@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Calendar-Note 產品提案</title>
+<style>
+:root{--ink:#282635;--muted:#777280;--line:#e7e4ec;--purple:#7358b4;--soft:#f2edf9;--paper:#f9f8fb}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.85 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC",sans-serif}a{color:var(--purple);text-underline-offset:4px}nav{position:sticky;top:0;z-index:2;background:#ffffffed;backdrop-filter:blur(12px);border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:20px;align-items:center;padding:17px max(24px,calc((100vw - 1040px)/2))}nav strong{white-space:nowrap;font-size:15px}nav div{display:flex;gap:22px}nav a{font-size:13px;text-decoration:none}main{max-width:1040px;margin:auto;padding:65px 30px 90px}.eyebrow{font-size:11px;letter-spacing:2px;color:var(--purple);font-weight:700}h1{font-size:44px;line-height:1.25;letter-spacing:-1.4px;margin:14px 0 20px}h2{font-size:24px;letter-spacing:-.5px;margin:48px 0 15px;scroll-margin-top:95px}h3{font-size:16px;margin:25px 0 8px}p{margin:9px 0 16px}.lead{font-size:19px;max-width:780px;color:#65606f}.actions{display:flex;gap:12px;flex-wrap:wrap;margin:26px 0 32px}.button{display:inline-block;padding:10px 19px;border:1px solid var(--line);border-radius:8px;background:white;color:var(--ink);font-size:14px;text-decoration:none}.button.primary{background:var(--purple);border-color:var(--purple);color:white}.flow{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin:30px 0}.card{background:white;border:1px solid var(--line);border-radius:12px;padding:23px}.card b{font-size:16px}.card p{font-size:13px;color:var(--muted);margin-bottom:0}.num{display:block;color:var(--purple);font-size:12px;margin-bottom:11px}.note{border-left:3px solid var(--purple);background:var(--soft);padding:15px 20px;border-radius:0 8px 8px 0;font-size:14px}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;background:white;font-size:14px}td,th{text-align:left;padding:14px 17px;border:1px solid var(--line);vertical-align:top}th{background:#f0edf5;font-weight:600}td:first-child{min-width:140px}code,pre{font:13px/1.7 ui-monospace,SFMono-Regular,Consolas,monospace}code{background:#eeeaf3;padding:2px 5px;border-radius:4px;overflow-wrap:anywhere}pre{background:#282533;color:#f1edf8;border-radius:10px;padding:22px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}li{margin:7px 0}.two{display:grid;grid-template-columns:1fr 1fr;gap:20px}.small{font-size:12px;color:var(--muted)}footer{border-top:1px solid var(--line);margin-top:45px;padding-top:20px;color:var(--muted);font-size:12px}.checklist li::marker{color:var(--purple)}@media(max-width:680px){main{padding:35px 20px}h1{font-size:34px}.flow,.two{grid-template-columns:1fr}nav{padding:15px 20px;align-items:flex-start}nav div{gap:8px;flex-wrap:wrap;justify-content:flex-end}td,th{padding:10px;font-size:12px}}
+</style>
+</head>
+<body>
+<nav><strong>▦ &nbsp; Calendar-Note</strong><div><a href="preview/index.html">主頁預覽 ↗</a><a href="preview/settings.html">設定預覽 ↗</a></div></nav>
+<main>
+<div class="eyebrow">PRODUCT PROPOSAL · UPDATED 2026.10.23 · DRAFT</div>
+<h1>在行事曆安排時間，<br>在筆記留下紀錄。</h1>
+<p class="lead">Calendar-Note 是以 Event Note 為核心的 Obsidian 行事曆。沒有 iCal 也能建立、重疊安排與調整事件；點擊事件，同時開啟專屬筆記，並在事件當日的 Daily Note 留下一個入口。</p>
+<div class="actions"><a class="button primary" href="preview/index.html">預覽主頁 →</a><a class="button" href="preview/settings.html">預覽設定 →</a><a class="button" href="#daily">Daily Notes 連動</a><a class="button" href="#acceptance">驗收條件</a></div>
+<div class="note"><strong>本次交付為提案與本機 HTML 互動原型。</strong>事件、Event Notes、Daily Notes 與設定儲存在瀏覽器，支援下載 Markdown；不會連線讀取 iCal，也不會寫入真實 Obsidian Vault。完整外掛規格與原型驗證範圍分開標示。提案位於 <code>docs/changes/calendar-note/</code>，定案後連同相關資源移入 <code>docs/specs/</code> 並更新入口。</div>
+<div class="flow">
+<div class="card"><span class="num">01 / PLAN</span><b>不必先訂閱，就能安排</b><p>點空白時間建立事件；被事件遮住時，右鍵也能在同一時間新增。iCal 是額外的來源。</p></div>
+<div class="card"><span class="num">02 / WRITE</span><b>一個事件，一篇筆記</b><p>標題自動轉成合法檔名；起訖時間用精簡 frontmatter 保存，正文留給你的紀錄。</p></div>
+<div class="card"><span class="num">03 / CONNECT</span><b>連回事件當天的日誌</b><p>點昨天的事件，就在昨天的 Daily Note「Event」段落新增筆記連結，不會誤寫到今天。</p></div>
+</div>
+<h2>使用者故事與首版範圍</h2>
+<p>身為 Obsidian 使用者，你希望從一週行事曆安排本機事件，也能選擇訂閱外部行程。點擊任何事件後，專屬筆記與當日 Daily Note 的入口一起就位，之後調整時間仍保留同一篇筆記。</p>
+<div class="table-wrap"><table>
+<thead><tr><th>你的需求</th><th>V1 行為</th><th>邊界</th></tr></thead>
+<tbody>
+<tr><td>預設一週</td><td>七天週曆，預設週一開始，保留今天、上一週、下一週與重新整理。</td><td>對齊 TaskNotes 的週／月／日／年／自訂天數／清單顯示、全天／跨日／重疊事件與目前時間線。HTML 先驗證週、月、日、清單。</td></tr>
+<tr><td>iCal 非必要</td><td>零訂閱或網址空白時，所有本機功能正常：建立、開啟筆記、Daily Notes 連動、時間調整與瀏覽。</td><td>本機事件來源永遠存在；不出現阻擋操作的「請先訂閱」。空網址不輪詢、不算錯誤，也不影響其他來源。</td></tr>
+<tr><td>空白時間建立事件</td><td>單擊週／日時間格，開啟事件對話框，預填該日期與時間；輸入名稱、開始與結束時間後建立。</td><td>預設一小時、15 分鐘刻度可調。取消不留下空白事件或筆記；無名稱、無效時間或結束早於開始時不能送出。</td></tr>
+<tr><td>同時建立多個事件</td><td>在空白格或既有事件上右鍵，選「在此時間新增事件」，用游標所指的時間開啟同一對話框。</td><td>不要求必須點到空白；重疊事件並排顯示。提供鍵盤選單與「新增事件」入口。</td></tr>
+<tr><td>上下拖曳調整大小</td><td>上緣調整開始時間，保留結束；下緣調整結束時間，保留開始。時間與畫面同步更新。</td><td>至少 15 分鐘，不允許反向區間。拖曳把手不誤觸開啟筆記或新增事件；取消拖曳恢復原時間。另提供時間編輯對話框。</td></tr>
+<tr><td>點擊事件</td><td>開啟／建立 Event Note，同時建立／更新事件當日 Daily Note 的一個 bullet link。</td><td>識別相同的事件不重複建檔、不重複 append；事件資訊由獨立入口開啟。</td></tr>
+<tr><td>靈活筆記路徑</td><td>Event Note 完整路徑沿用 Moment 日期語法，另支援事件變數；預設檔名為合法化的事件名稱。</td><td>Daily Note 另採 Daily Notes 的資料夾與 Custom format，不混用 Event Note 的命名設定。</td></tr>
+<tr><td>精簡 frontmatter</td><td>Event Note 儲存穩定 ID、start、end；有訂閱關聯才增加必要來源欄位。</td><td>介面預設折疊屬性，不把描述、出席者、重複的標題或大份 ICS payload 塞進 frontmatter。</td></tr>
+</tbody></table></div>
+<p class="small">需求來源：本次使用者需求及追加需求。週一起始、15 分鐘刻度、一小時預設時長與 15 分鐘輪詢為提案的可調整預設。</p>
+<h2 id="daily">Daily Notes 連動</h2>
+<p>事件日期取自<strong>事件有效開始時間在顯示時區中的日期</strong>，不使用點擊當下的日期。以 10 月 23 日操作為例，點擊 10 月 22 日的事件，Daily Note 應落在 <code>Daily Notes/2026-10-22.md</code>。全天事件保留原始日期，不做會改變日期的時區換算。</p>
+<ol>
+<li>先確保 Event Note 建立成功或已存在，再解析該日期對應的 Daily Note。若 Daily Notes 已啟用，沿用它的資料夾、Custom format 與模板；缺少資料夾或日誌時自動建立。</li>
+<li>若核心 Daily Notes 未啟用，仍使用 Calendar-Note 設定中的 Daily Note 路徑格式，預設 <code>[Daily Notes]/YYYY-MM-DD</code>。不把啟用其他外掛當成必要前提。</li>
+<li>找到內容中的 <code>## Event</code>。若不存在，在正文末端加入；若存在，把新 bullet 接在此段落內容下方、下一個同級或更高層級標題之前，保留原有內容及其他段落。</li>
+<li>新增的項目是 Event Note 的內部連結，包含事件時間。相同事件再次點擊只更新同一個項目；不同事件即使標題一樣也各有一個連結。</li>
+<li>開始日期改變時，把 Calendar-Note 管理的那一個項目移到新日期；同日調整則只改時間。不刪除日誌中的其他文字、手寫 bullet 或事件筆記正文。</li>
+</ol>
+<div class="two"><div><h3>事件筆記</h3><pre>Calendar Notes/產品策略 Q4 Roadmap.md
+
+---
+event_id: local-7f3a
+start: "2026-10-22T10:00:00+08:00"
+end: "2026-10-22T11:00:00+08:00"
+---
+# 產品策略 / Q4: Roadmap?
+
+## 討論紀錄
+
+## 後續行動</pre></div>
+<div><h3>昨天的 Daily Note</h3><pre>Daily Notes/2026-10-22.md
+
+# 2026-10-22
+
+## Event
+- 10:00–11:00 [[Calendar Notes/產品策略 Q4 Roadmap|產品策略 Q4 Roadmap]]
+
+## Journal
+原本的日誌內容繼續保留。</pre></div></div>
+<p>插入位置需跳過 fenced code block 與 frontmatter 裡的假標題；<code>###</code> 子段落仍屬於 Event 區段。Wikilink 使用實際儲存路徑，顯示文字需清理 <code>[]|#</code> 等會改變連結解析的符號。建立與更新以每個檔案的寫入佇列序列化，避免快速連點遺漏項目。</p>
+<p>Daily Note 的預設是<strong>每一天一個檔案</strong>；若自訂格式刻意讓多天共用檔案，依使用者設定處理，不另造日期檔名。Event Note 與 Daily Note 不得解析成相同檔案，否則顯示設定錯誤並中止該次連動。</p>
+<p>若 Event Note 建立成功、Daily Note 寫入失敗，保留已建立的筆記並回報具體失敗；重試時只補缺少的步驟，不建立第二篇。若使用者已改寫自動產生的 bullet，保留文字並提示重新連結，不猜測刪除範圍。</p>
+<h2>建立事件與調整時間</h2>
+<p>本機事件直接由 Event Note 的 frontmatter 提供資料，不依賴遠端訂閱或額外的必要資料庫。建立事件時，先決定合法路徑並建立筆記，再把事件加入畫面及當日日誌。畫面上的任何重疊時間都可新增另一事件。</p>
+<div class="table-wrap"><table><thead><tr><th>操作</th><th>結果</th><th>資料一致性</th></tr></thead><tbody>
+<tr><td>單擊空白時間</td><td>開啟新增事件對話框，預填所指日期時間。</td><td>對話框取消不建立檔案；送出成功即產生 Event Note 與 Daily Note 項目。</td></tr>
+<tr><td>右鍵既有事件</td><td>即使事件擋住底下格線，也能在游標所指時間新增重疊事件。</td><td>新事件有新的穩定 ID，不借用被點擊事件的 ID 或筆記。</td></tr>
+<tr><td>拖曳上緣</td><td>修改 start，固定 end。</td><td>寫回同一篇筆記的 start，重新計算重疊布局與 Daily Note 項目。</td></tr>
+<tr><td>拖曳下緣</td><td>修改 end，固定 start。</td><td>寫回同一篇筆記的 end，不建立另一篇 Event Note。</td></tr>
+<tr><td>用對話框修改時間</td><td>與拖曳相同的寫入流程，可精確輸入起訖時間。</td><td>鍵盤／觸控使用者也能完成操作；跨日以開始日期歸入一篇 Daily Note。</td></tr>
+<tr><td>iCal 事件調整時間</td><td>建立／使用其 Event Note 保存本機時間覆寫，標示「本機覆寫」。</td><td>不回寫 iCal、不變更原 UID／原始場次。後續遠端同步保留覆寫，另顯示來源時間已改變的狀態；可還原來源時間。</td></tr>
+</tbody></table></div>
+<p>拖曳時先提供畫面預覽，成功寫入後確認；寫入失敗要恢復原時間並保留原筆記。原型用瀏覽器儲存示範此流程；實際外掛以 <code>Vault.process</code>／<code>processFrontMatter</code> 等檔案操作保存，保留正文及不相關屬性。</p>
+<h2>精簡 frontmatter 與穩定識別</h2>
+<p>本機事件平常只需要 <code>event_id</code>、<code>start</code>、<code>end</code> 三個欄位；全天事件才加 <code>all_day: true</code>。時間為含偏移量的 ISO 格式。屬性在畫面預設折疊，完整 Markdown 仍可讀取與匯出。</p>
+<p>訂閱事件才增加必要的來源關聯：<code>source</code> 表示訂閱 ID 與 UID 的穩定參照，重複行程另保存原始 <code>recurrence_id</code>。完整來源資料由訂閱快取負責，不在每篇筆記重複儲存。若保留使用者新增的 frontmatter 屬性，只修改 Calendar-Note 管理的欄位。</p>
+<p>一次性訂閱事件使用 <code>subscriptionId + UID</code>；重複事件使用 <code>subscriptionId + UID + 原始 occurrence start／RECURRENCE-ID</code>。本機事件使用產生後不變的 event_id。<strong>有效 start 可被修改，不能拿它當可變的事件識別。</strong>改時間、改標題或重新命名筆記後，仍開啟同一篇檔案。</p>
+<p>使用者手動修改 Event Note 的時間時，外掛重新解析、驗證並更新行事曆；無效區間標示錯誤，不把錯誤資料當成新事件。Daily Notes 只作為事件索引，不反向解析手寫 bullet 建立第二個事件來源。</p>
+<h2>Event Note 路徑格式</h2>
+<p>完整路徑格式同時決定資料夾與檔名。日期以新建時的事件開始時間套用；既有筆記之後調整時間不自動搬動。預設 <code>[Calendar Notes]/{title}</code>，檔名以事件名稱自動合法化；也可沿用原有的日期與資料夾配置。</p>
+<div class="table-wrap"><table><thead><tr><th>格式</th><th>2026 年 10 月 23 日的結果</th></tr></thead><tbody>
+<tr><td><code>[Calendar Notes]/{title}</code></td><td><code>Calendar Notes/產品策略 Q4 Roadmap.md</code></td></tr>
+<tr><td><code>[Meetings]/YYYY/MM/DD/{title}</code></td><td><code>Meetings/2026/10/23/產品策略 Q4 Roadmap.md</code></td></tr>
+<tr><td><code>YYYY/MMMM/YYYY-MMM-DD/{title}</code></td><td>英文 locale：<code>2026/October/2026-Oct-23/產品策略 Q4 Roadmap.md</code></td></tr>
+<tr><td><code>[Meetings]/{calendar}/GGGG/[W]WW/{title}</code></td><td><code>Meetings/工作/2026/W43/產品策略 Q4 Roadmap.md</code></td></tr>
+</tbody></table></div>
+<p class="small">原始標題「產品策略 / Q4: Roadmap?」的非法字元以空白取代，連續空白合併。原始名稱保留在筆記標題；為避免改變 Markdown 結構，必要時跳脫符號。</p>
+<p>日期 token、<code>[literal]</code>、語系與跳脫規則使用 Moment，與 <a href="https://obsidian.md/help/plugins/daily-notes">Daily Notes 官方說明</a>使用的格式引擎一致。<code>{title}</code>、<code>{calendar}</code>、<code>{uid}</code> 是 Calendar-Note 額外提供的事件變數，不是 Daily Notes 的原生語法。完整日期格式參見 <a href="https://momentjs.com/docs/#/displaying/format/">Moment 官方文件</a>。</p>
+<ol>
+<li>先保護事件變數，再套用 Moment 日期，最後插入清理後的值。標題中的 YYYY 不會被當成日期，斜線也不會偷偷新增資料夾；方括號內的固定文字保留原意。</li>
+<li>清理控制字元、跨平台非法字元、結尾句點／空白及 Windows 保留名稱。按 UTF-8 位元組限制長度，保留完整 Unicode 字元，預留副檔名及重名編號空間。空名稱改用「未命名事件」。</li>
+<li>只接受 Vault 相對路徑；拒絕絕對路徑、磁碟代號、<code>..</code> 越界與未知變數。副檔名只保留一個 <code>.md</code>。</li>
+<li>不同事件遇到已占用路徑時建立 <code>標題 (2).md</code>，不覆寫未綁定檔案。相同事件直接開啟原路徑；用事件鎖與大小寫／Unicode 正規化檢查避免重複建立。</li>
+</ol>
+<h2>可選的 iCal 訂閱</h2>
+<p>首次開啟即可使用本機行事曆，訂閱設定可完全留白。設定有效網址後才啟用該來源的輪詢；HTTPS 及 webcal URL 不必以 .ics 結尾，應依回應內容驗證。訂閱只拉取外部資料，本機事件不經任何遠端服務。</p>
+<div class="table-wrap"><table><thead><tr><th>情境</th><th>V1 預期行為</th></tr></thead><tbody>
+<tr><td>正常同步</td><td>預設 15 分鐘輪詢，支援手動更新；使用 Obsidian requestUrl，webcal 轉為 HTTPS，依來源支援採用 ETag／Last-Modified。</td></tr>
+<tr><td>零來源／空網址</td><td>不排程遠端請求、不報連線錯誤；本機事件建立、拖曳、Event Notes 與 Daily Notes 全部照常。</td></tr>
+<tr><td>單一來源失敗</td><td>保留最後有效資料，明確顯示最後成功與失敗時間、重試入口及退避；不清空其他訂閱或本機事件。</td></tr>
+<tr><td>重複與跨日</td><td>支援 RRULE、RDATE、EXDATE、RECURRENCE-ID 覆寫、STATUS:CANCELLED；全天 DTEND 不包含結束日。只在可見範圍展開。</td></tr>
+<tr><td>時區與 DST</td><td>處理 VTIMEZONE、TZID、UTC 與 floating time；浮動時間採顯示時區，未知時區需標示。原型固定使用 Asia/Taipei。</td></tr>
+<tr><td>本機時間覆寫</td><td>來源同步更新原始事件，Event Note 保存的本機時間優先顯示；標示差異並可還原，不默默丟掉使用者的調整。</td></tr>
+<tr><td>事件取消／移除來源</td><td>不刪除 Event Note 或日誌紀錄。既有筆記仍可閱讀；來源已取消或移除的狀態需清楚呈現。</td></tr>
+<tr><td>執行生命週期</td><td>Obsidian 與外掛執行期間才輪詢；啟動顯示快取並更新，喚醒後依檢查時間補抓，停用時清除計時器。</td></tr>
+</tbody></table></div>
+<p>私密訂閱網址只留在外掛設定，不寫入筆記、日誌或分析服務。遠端文字不執行 HTML。原型全部是本機示範，不可把瀏覽器 fetch／CORS 的結果拿來判斷實際 Obsidian 訂閱能力。</p>
+<h2>參考專案與架構</h2>
+<div class="two">
+<div class="card"><b>TaskNotes</b><p>本機版本以 FullCalendar 提供六種檢視、日期導覽與事件操作；ICSNoteService 已有事件筆記與來源關聯概念。Calendar-Note 沿用這些操作習慣，讓點擊直接開啟筆記，並增加當日日誌連動。</p><p><a href="https://github.com/callumalpass/tasknotes/blob/971e5c9a67661210bd71483ff7f6e5a35047ac3c/src/bases/CalendarView.ts">CalendarView</a> · <a href="https://github.com/callumalpass/tasknotes/blob/971e5c9a67661210bd71483ff7f6e5a35047ac3c/src/services/ICSNoteService.ts">ICSNoteService</a></p></div>
+<div class="card"><b>Day Planner</b><p>本機版本的 iCal 設定以名稱、網址與顏色區分；失敗可退回先前回應，重複事件亦處理例外、覆寫與時區。Calendar-Note 借鏡來源模型與失敗處理，並以 Event Notes 管理本機事件。</p><p><a href="https://github.com/ivan-lednev/obsidian-day-planner/blob/9c483b364d2cd663a336baa427f287c36222c9b8/src/redux/ical/init-ical-listeners.ts">抓取與快取</a> · <a href="https://github.com/ivan-lednev/obsidian-day-planner/blob/9c483b364d2cd663a336baa427f287c36222c9b8/src/util/ical.ts">重複事件</a></p></div>
+</div>
+<p>兩個專案皆為 MIT；若使用其程式碼，保留相應版權與授權。獨立外掛不移入整套任務看板或 Bases 查詢架構。</p>
+<pre>Obsidian Plugin
+  ├─ CalendarView         顯示、時間格／右鍵新增、resize 與重疊布局
+  ├─ EventNoteService     穩定 ID、精簡 frontmatter、建立與開啟筆記
+  ├─ DailyNoteService     日期路徑、模板、Event 段落、去重與移動項目
+  ├─ NotePathResolver     Moment、變數、合法檔名與 Vault 路徑驗證
+  ├─ SubscriptionService 可選來源、輪詢、快取與失敗狀態
+  ├─ ICalParser           重複場次、例外、時區與有效時間合併
+  └─ SettingsTab          兩種筆記路徑、可選訂閱與顯示設定</pre>
+<h2>實作順序與文件生命週期</h2>
+<ol>
+<li><strong>先完成無訂閱的核心。</strong>空白格／右鍵新增、三個必要 frontmatter 欄位、同一事件只開一篇 Event Note，以及正確日期的 Daily Note bullet。</li>
+<li><strong>補齊時間編輯與資料一致性。</strong>上下 resize、對話框精確輸入、重疊布局、穩定識別與跨日的日誌項目移動；寫入失敗能重試或回復。</li>
+<li><strong>再加入 iCal。</strong>多來源快取、例外與時區、本機時間覆寫及來源衝突提示，不能破壞零訂閱的核心流程。</li>
+<li><strong>對齊顯示並包裝外掛。</strong>以同一批資料比對 TaskNotes 六種檢視，完成桌面／窄螢幕與鍵盤驗收。</li>
+<li><strong>規格定案後歸檔。</strong>目前提案與 HTML 資源統一放在 <code>docs/changes/calendar-note/</code>；正式採納並完成對應規格整理時，移到 <code>docs/specs/calendar-note/</code>，同步修改 README 的入口與相關連結。</li>
+</ol>
+<p>本次 GitHub 發布是提案與 HTML 原型的分支提交，不等同 Obsidian 外掛發布。README 必須與發布結果一起更新、commit 及 push，記錄可操作功能、執行方法、測試與尚未驗證範圍。</p>
+<h2 id="acceptance">驗收條件</h2>
+<ul class="checklist">
+<li><strong>零 iCal：</strong>清空所有網址後，能新增本機事件、建立兩種筆記、調整時間、重新開啟並看到保存的資料。</li>
+<li><strong>昨天的事件：</strong>10 月 23 日點擊 10 月 22 日的事件，只在 10 月 22 日的 Daily Note「Event」段落追加連結。</li>
+<li><strong>日誌保留：</strong>日誌／Event 段落不存在時建立；存在時 append，不覆寫既有 bullet 或下一個段落，重複點擊同一事件只保留一項。</li>
+<li><strong>建立入口：</strong>單擊空白格出現正確預填時間；右鍵被既有事件覆蓋的時間也能建立第二、第三個事件。</li>
+<li><strong>重疊：</strong>三個相互重疊事件可辨識、點擊及調整；剛好相接的區間不誤判重疊。</li>
+<li><strong>上下 resize：</strong>上緣只改 start，下緣只改 end；至少 15 分鐘，取消／無效操作不留下錯誤時間；不誤觸新增。</li>
+<li><strong>frontmatter：</strong>本機事件僅三個必要欄位；編輯起訖時間保留筆記正文、不相關屬性與原路徑。</li>
+<li><strong>穩定關聯：</strong>調整時間後仍開原筆記；同日更新 bullet 的時間，開始日期改變時移到新日誌。</li>
+<li><strong>兩種路徑：</strong>Event Note 路徑支援日期與事件變數；Daily Note 沿用 Daily Notes 的 Custom format，無核心外掛時可獨立設定。</li>
+<li><strong>合法檔名：</strong>斜線、冒號、保留名稱、空白、中文與 emoji 長標題都能產生合法片段；不同事件重名不覆寫檔案。</li>
+<li><strong>iCal 可靠性：</strong>一個來源失敗不影響其他來源／本機功能；調整遠端事件只保存本機覆寫，不回寫上游。</li>
+<li><strong>完整外掛：</strong>重複例外、DST、跨午夜、全天排除式結束日、手動移動筆記與檔案寫入失敗都有獨立驗收。</li>
+</ul>
+<footer>依使用者追加需求修訂。參考本機 TaskNotes 971e5c9a、Day Planner 9c483b36，以及 Obsidian／Moment 官方文件。HTML 原型的實際驗證結果與限制見根目錄 README.md。</footer>
+</main>
+</body>
+</html>

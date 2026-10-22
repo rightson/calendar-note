@@ -2,7 +2,7 @@
   'use strict';
   var momentLib = typeof module === 'object' && module.exports ? require('./vendor/moment-with-locales.min.js') : root.moment;
   function cleanSegment(value) {
-    var text = String(value == null ? '' : value).normalize('NFC').replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().replace(/[. ]+$/g, '');
+    var text = String(value == null ? '' : value).normalize('NFC').replace(/[<>:"/\\|?*#^\[\]\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().replace(/[. ]+$/g, '');
     if (!text || /^\.+$/.test(text)) text = '未命名事件';
     if (/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(text)) text = '_' + text;
     // Leave room below common 255-byte limits for .md and collision suffixes.
