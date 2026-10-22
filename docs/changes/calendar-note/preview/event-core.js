@@ -5,7 +5,7 @@
   var pathLib = node ? require('./path-format.js') : root.CalendarPath;
   function date(value) {
     var result = momentLib.parseZone(value, momentLib.ISO_8601, true);
-    if (!result.isValid()) throw new Error('請輸入有效的日期與時間。');
+    if (!result.isValid()) throw new Error('Enter a valid date and time.');
     return result.utcOffset(480);
   }
   function iso(value) { return date(value).format('YYYY-MM-DDTHH:mm:ssZ'); }
@@ -14,8 +14,8 @@
   }
   function validateInterval(start, end) {
     var from = date(start), to = date(end);
-    if (to.diff(from, 'minutes', true) < 15) throw new Error('事件結束時間需至少晚於開始時間 15 分鐘。');
-    if (to.isAfter(from.clone().startOf('day').add(1, 'day'))) throw new Error('此原型支援單日事件；結束時間最晚可到當日午夜。');
+    if (to.diff(from, 'minutes', true) < 15) throw new Error('The event must end at least 15 minutes after it starts.');
+    if (to.isAfter(from.clone().startOf('day').add(1, 'day'))) throw new Error('This prototype supports single-day events ending no later than midnight.');
     return {start:iso(from), end:iso(to)};
   }
   function resizeInterval(event, edge, deltaMinutes) {
@@ -23,10 +23,10 @@
     var change = Math.round(deltaMinutes / 15) * 15;
     if (edge === 'start') from.add(change, 'minutes');
     else if (edge === 'end') to.add(change, 'minutes');
-    else throw new Error('未知的時間調整方向。');
+    else throw new Error('Unknown time adjustment direction.');
     // The opposite edge is fixed. Resizing stays inside the event's calendar day.
     var day = date(event.start).startOf('day');
-    if (from.isBefore(day) || !from.isBefore(day.clone().add(1,'day')) || to.isAfter(day.clone().add(1,'day'))) throw new Error('拖曳請保持在同一天內；可用「調整時間」移至其他日期。');
+    if (from.isBefore(day) || !from.isBefore(day.clone().add(1,'day')) || to.isAfter(day.clone().add(1,'day'))) throw new Error('Keep dragging within the same day. Use “Adjust time” to move to another date.');
     return validateInterval(from, to);
   }
   function splitFrontmatter(content) {
@@ -46,10 +46,10 @@
     });
     return '---'+parsed.newline+lines.join(parsed.newline)+parsed.newline+'---'+parsed.newline+parsed.body;
   }
-  function safeAlias(title) { return String(title).replace(/[\[\]|#\r\n]/g,' ').replace(/\s+/g,' ').trim() || '未命名事件'; }
-  function dailyPath(pattern, event, locale) { return pathLib.formatPath(pattern,{title:event.title,calendar:event.calendar||'本機事件',uid:event.uid,start:event.start},locale); }
+  function safeAlias(title) { return String(title).replace(/[\[\]|#\r\n]/g,' ').replace(/\s+/g,' ').trim() || 'Untitled event'; }
+  function dailyPath(pattern, event, locale) { return pathLib.formatPath(pattern,{title:event.title,calendar:event.calendar||'Local events',uid:event.uid,start:event.start},locale); }
   function dailyBullet(event,notePath) {
-    var from=date(event.start),to=date(event.end),time=event.allDay?'全天':from.format('HH:mm')+'–'+(to.date()!==from.date()?'24:00':to.format('HH:mm'));
+    var from=date(event.start),to=date(event.end),time=event.allDay?'All day':from.format('HH:mm')+'–'+(to.date()!==from.date()?'24:00':to.format('HH:mm'));
     return '- '+time+' [['+notePath.replace(/\.md$/i,'')+'|'+safeAlias(event.title)+']]';
   }
   function markdownLines(content) {

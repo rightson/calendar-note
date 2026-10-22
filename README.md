@@ -1,59 +1,61 @@
 # Calendar-Note
 
-Calendar-Note 是一個規劃中的 Obsidian 行事曆外掛。以 Event Note 保存事件，點擊後開啟筆記，並在事件當日的 Daily Note `Event` 段落留下連結。iCal 是可選來源，沒有訂閱仍能建立與調整本機事件。
+Calendar-Note is a proposed Obsidian calendar plugin built around Event Notes. Clicking an event opens its note and adds a link under the `Event` section of the Daily Note for that event's date. iCal subscriptions are optional: local events can be created and rescheduled without a subscription.
 
-目前提供產品提案與本機 HTML 互動原型，尚未實作 Obsidian 外掛、真實 iCal 抓取或 Vault 寫入。
+The repository currently contains a product proposal and an interactive HTML prototype. The Obsidian plugin, live iCal fetching, and Vault writes have not been implemented.
 
-## 提案與預覽
+## Proposal and previews
 
-所有提案 HTML 與相關資源集中於 `docs/changes/calendar-note/`：
+Proposal documents and their assets live in `docs/changes/calendar-note/`:
 
-- [產品提案](docs/changes/calendar-note/proposal.html)：使用者故事、事件／日誌連動、frontmatter、訂閱邊界、架構與驗收條件。
-- [主頁預覽](docs/changes/calendar-note/preview/index.html)：週／月／日／清單、建立本機事件、事件筆記與 Daily Note 預覽。
-- [設定頁預覽](docs/changes/calendar-note/preview/settings.html)：可選訂閱、Event Note 路徑、Daily Note 路徑及即時格式預覽。
+- [Product proposal](docs/changes/calendar-note/proposal.html): user stories, event and journal linking, frontmatter, subscription boundaries, architecture, and acceptance criteria.
+- [Calendar preview](docs/changes/calendar-note/preview/index.html): week, month, day, and list views; local event creation; Event Note and Daily Note previews.
+- [Settings preview](docs/changes/calendar-note/preview/settings.html): optional subscriptions, Event Note and Daily Note path formats, and live path previews.
 
-GitHub 的檔案頁面顯示原始碼；檢視互動版請將專案下載到本機，以瀏覽器直接開啟 HTML，或使用以下靜態伺服器。
+GitHub displays the HTML source. To use the interactive previews, download the repository and open the HTML files in a browser, or run this static server from the repository root:
 
 ```sh
 python3 -m http.server 4317 --bind 127.0.0.1
 ```
 
-從專案根目錄執行後開啟：
+Then open:
 
-- 提案：<http://127.0.0.1:4317/docs/changes/calendar-note/proposal.html>
-- 主頁：<http://127.0.0.1:4317/docs/changes/calendar-note/preview/index.html>
-- 設定：<http://127.0.0.1:4317/docs/changes/calendar-note/preview/settings.html>
+- Proposal: <http://127.0.0.1:4317/docs/changes/calendar-note/proposal.html>
+- Calendar: <http://127.0.0.1:4317/docs/changes/calendar-note/preview/index.html>
+- Settings: <http://127.0.0.1:4317/docs/changes/calendar-note/preview/settings.html>
 
-不需安裝套件或建置。Moment 已隨檔案提供，不依賴外部 CDN。
+No dependency installation or build is required. Moment is bundled locally; the previews do not depend on an external CDN.
 
-## 原型操作
+## Try the prototype
 
-1. **不設定 iCal 直接使用。** 本機事件來源獨立存在；不需要先填寫網址。示範日期位於 2026 年 10 月 19–25 日。
-2. **建立事件。** 在週／日檢視點擊空白時間格，或使用「新增事件」，填寫名稱及起訖時間。取消對話框不會留下事件。
-3. **建立重疊事件。** 在既有事件上按右鍵，選擇在此時間新增；不必尋找被遮住的空白格。也能從新增對話框輸入相同時段。
-4. **點擊並記錄。** 首次開啟事件會建立示範 Event Note，並在事件開始日期的 Daily Note `## Event` 下追加 bullet link。再次開啟不重複插入。
-5. **檢查過去日期。** 點擊 10 月 22 日的事件，切換至 Daily Note 預覽，確認連結寫在 10 月 22 日，而非操作當天的日誌。
-6. **調整區間。** 拖曳事件上緣修改開始時間、下緣修改結束時間；另可用時間編輯對話框精確輸入。調整後維持同一筆記，更新 frontmatter 與日誌時間。
-7. **檢視 Markdown。** Event Note 的三個必要屬性預設折疊；可以預覽或下載 Event Note 與 Daily Note。
-8. **可選訂閱。** 新增網址僅演示設定；示範訂閱須由介面明確載入，不會讀取真實遠端事件。
+1. **Start without iCal.** Local events work independently. No subscription URL is required. Sample events are dated October 19–25, 2026.
+2. **Create an event.** Click an empty time slot in week or day view, or choose **New event**, then enter a title and start/end times. Canceling leaves no event behind.
+3. **Create overlapping events.** Right-click an existing event and choose to create an event at that time. You do not need to find an uncovered slot. The creation dialog also accepts an occupied time range.
+4. **Open a note.** The first click creates a sample Event Note and adds a bullet link under `## Event` in the Daily Note for the event's start date. Reopening does not duplicate the link.
+5. **Check a past date.** Open the October 22 event and switch to its Daily Note. The link belongs to October 22, regardless of when you click.
+6. **Adjust the interval.** Drag the top edge to change the start or the bottom edge to change the end. A time-editing dialog provides precise input. The Event Note keeps its identity and path while its frontmatter and journal link are updated.
+7. **Inspect Markdown.** The three required event properties are collapsed by default. Preview or download either the Event Note or the Daily Note.
+8. **Optionally add subscriptions.** URL fields demonstrate settings only. Sample subscriptions must be loaded explicitly; the prototype does not fetch remote events.
 
-## 檔案與格式規則
+## Paths and file format
 
-Event Note 預設路徑：
+The default Event Note path is:
 
 ```text
 [Calendar Notes]/{title}
 ```
 
-也能使用日期資料夾，例如：
+Date-based folders are supported, for example:
 
 ```text
 [Meetings]/YYYY/MM/DD/{title}
 ```
 
-事件標題 `產品策略 / Q4: Roadmap?` 會轉成合法檔名 `產品策略 Q4 Roadmap.md`。日期使用事件開始時間，支援 Moment 日期 token、locale、`[literal]` 與跳脫字元；`{title}`、`{calendar}`、`{uid}` 是額外事件變數。未知變數、越界及絕對路徑會被阻擋。重名事件自動加編號，不覆寫其他筆記；修改路徑格式不搬動既有筆記。
+The title `Product strategy / Q4: Roadmap?` becomes `Product strategy Q4 Roadmap.md`. Dates come from the event's start time. Formats support Moment date tokens, locales, `[literal]` text, and escaping. `{title}`, `{calendar}`, and `{uid}` are additional event variables.
 
-本機 Event Note 使用三個必要 frontmatter 欄位：
+Unknown variables, parent traversal, and absolute paths are rejected. Filename collisions receive a numeric suffix instead of overwriting another note. Changing a path format does not move existing notes.
+
+Local Event Notes use three required frontmatter fields:
 
 ```yaml
 ---
@@ -63,33 +65,37 @@ end: "2026-10-22T11:00:00+08:00"
 ---
 ```
 
-Daily Note 另有自己的 Moment 路徑格式，預設：
+Daily Notes have a separate Moment path format, which defaults to:
 
 ```text
 [Daily Notes]/YYYY-MM-DD
 ```
 
-日誌連動結果：
+The generated journal entry looks like this:
 
 ```markdown
 ## Event
-- 10:00–11:00 [[Calendar Notes/產品策略 Q4 Roadmap|產品策略 Q4 Roadmap]]
+- 10:00–11:00 [[Calendar Notes/Product strategy Q4 Roadmap|Product strategy Q4 Roadmap]]
 ```
 
-實際外掛規劃沿用核心 Daily Notes 的資料夾、Custom format 及模板；核心外掛未啟用時使用 Calendar-Note 的設定。原型以設定頁獨立示範，不會讀取真實 Obsidian 設定。
+The planned plugin will reuse the core Daily Notes folder, custom format, and template. When that core plugin is disabled, Calendar-Note will use its own settings. The HTML prototype demonstrates these settings independently and does not read a real Obsidian configuration.
 
-## 資料與限制
+## Data and limitations
 
-- 事件、設定與兩種筆記只存於目前瀏覽器的 localStorage；下載 Markdown 才會產生匯出檔案。清除瀏覽器儲存資料會重置原型。
-- 檔案開啟與 HTTP 開啟的儲存空間可能不同。瀏覽器禁止儲存時，當次頁面仍可操作，但重開可能不保留資料。
-- 使用示範網址即可；沒有真實 iCal 請求、排程監控、Obsidian API 操作或遠端寫入。
-- iCal 的時間調整規劃為本機覆寫，不回寫訂閱來源；示範介面用本機資料呈現此行為。
-- 原型時區固定為 Asia/Taipei（UTC+8）。目前事件編輯以單日區間為範圍，結束最晚可到翌日 00:00，至少 15 分鐘；完整跨日與 DST 處理列在 V1 規格中。
-- HTML 提供週／月／日／清單；年、自訂天數、完整 RRULE 及實際 Vault 寫入屬於待實作的外掛規格。
+- Events, settings, and both note types are stored in the current browser's localStorage. Markdown files are exported only when downloaded. Clearing browser storage resets the prototype.
+- File URLs and HTTP URLs may use separate storage. If browser storage is unavailable, the current page remains usable, but changes may not survive a reload.
+- Use sample URLs. There are no live iCal requests, scheduled polling, Obsidian API calls, or remote writes.
+- Rescheduling an imported event creates a local override; it does not write back to the subscription provider.
+- The prototype uses Asia/Taipei (UTC+8). Editing is limited to intervals within one calendar day, ending no later than the following midnight, with a minimum duration of 15 minutes. Full cross-day and DST handling remain part of the V1 specification.
+- The HTML supports week, month, day, and list views. Year and custom-day views, complete RRULE handling, and actual Vault writes remain planned plugin features.
 
-## 檢查
+## Language policy
 
-從專案根目錄執行：
+Repository-authored documentation, comments, messages, test descriptions, and preview UI use English. English is the default date locale. Multilingual dates and Unicode filenames remain supported; bundled third-party locale data is retained unchanged. Existing user-created content in browser storage is not translated automatically.
+
+## Checks
+
+Run from the repository root:
 
 ```sh
 node --check docs/changes/calendar-note/preview/app.js
@@ -99,25 +105,23 @@ node docs/changes/calendar-note/preview/smoke-test.cjs
 node docs/changes/calendar-note/preview/event-core.test.cjs
 ```
 
-格式測試涵蓋完整 Moment 日期、語系、literal、事件變數保護、合法檔名、Unicode 長度與相對路徑。事件核心測試涵蓋事件日期的日誌路徑、段落邊界與程式碼區塊、重複連結、保留筆記內容、穩定識別、重疊布局及時間調整。
+Path tests cover Moment formats, locales, literal text, protected event variables, filename sanitization, Unicode byte limits, and relative paths. Event tests cover event-date journal paths, heading and code-fence boundaries, duplicate links, Markdown preservation, stable identity, overlap layout, and interval resizing.
 
-另外使用暫存安裝的 DOM 模擬環境驗證頁面初始化、零訂閱新增、昨日連結與去重、改日後日誌項目移動、三事件重疊、上下緣事件處理與取消、右鍵所指時間、空白網址草稿、重新載入，以及建立／編輯遇到路徑衝突時的回復。DOM 模擬套件未加入專案執行依賴。
+A temporary DOM simulation was also used to check initialization, creation without subscriptions, past-date links, deduplication, moving journal entries between dates, three-way overlap, resize and cancellation handlers, context-menu times, blank URL drafts, reload persistence, and collision rollback. The DOM test package is not a project runtime dependency.
 
-瀏覽器自動化環境目前回報 `Sky Computer Use native pipe startup failed`，因此這次未完成視覺及端到端滑鼠拖曳驗證；不能把核心測試視為完整瀏覽器驗收。
+Browser automation reported `Sky Computer Use native pipe startup failed`, so visual checks and real browser drag-and-drop verification remain incomplete. Core and simulated DOM tests do not replace browser acceptance testing.
 
-## 文件生命週期
+## Documentation lifecycle
 
-提案階段維持在 `docs/changes/calendar-note/`。規格正式定案後，將整組文件與預覽資源移至 `docs/specs/calendar-note/`，並一併修改 README 與相對連結。現階段不把草案標示為已完成的外掛規格。
+Draft proposals remain in `docs/changes/calendar-note/`. Once the specification is finalized, move the documents and preview assets together to `docs/specs/calendar-note/`, updating this README and relative links. Draft documents do not represent a completed plugin implementation.
 
-## GitHub 分支
+Publishing a source branch to GitHub does not deploy a GitHub Pages site or release an Obsidian community plugin.
 
-此輪成果發布至 [`proposal-codex`](https://github.com/rightson/calendar-note/tree/proposal-codex) 分支，包含提案、原型、測試與 README。這是原始碼分支發布，不是 GitHub Pages 網站或 Obsidian 外掛商店發布。
+## References and licenses
 
-## 參考與授權
+- [TaskNotes](https://github.com/callumalpass/tasknotes), reviewed local revision `971e5c9a`: calendar views and event-note concepts.
+- [Obsidian Day Planner](https://github.com/ivan-lednev/obsidian-day-planner), reviewed local revision `9c483b36`: source configuration, caching, recurrence, and time zones.
+- [Daily Notes documentation](https://obsidian.md/help/plugins/daily-notes).
+- [Moment format documentation](https://momentjs.com/docs/#/displaying/format/).
 
-- [TaskNotes](https://github.com/callumalpass/tasknotes)，本機參考版本 `971e5c9a`：行事曆檢視與事件筆記概念。
-- [Obsidian Day Planner](https://github.com/ivan-lednev/obsidian-day-planner)，本機參考版本 `9c483b36`：來源設定、快取、重複事件與時區處理。
-- [Daily Notes 官方說明](https://obsidian.md/help/plugins/daily-notes)。
-- [Moment 日期格式](https://momentjs.com/docs/#/displaying/format/)。
-
-兩個參考專案皆為 MIT。原型未移入其完整外掛架構；隨附 Moment 2.30.1 的授權見 [MOMENT-LICENSE](docs/changes/calendar-note/preview/vendor/MOMENT-LICENSE)。本專案授權見 [LICENSE](LICENSE)。
+Both reference projects use the MIT license. The prototype does not import their full plugin architectures. The bundled Moment 2.30.1 license is in [MOMENT-LICENSE](docs/changes/calendar-note/preview/vendor/MOMENT-LICENSE). See [LICENSE](LICENSE) for this project's license.
