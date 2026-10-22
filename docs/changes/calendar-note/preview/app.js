@@ -20,7 +20,7 @@
   var saved=read('calendar-note-settings-v1',null);
   var formatSample={title:'Product strategy / Q4: Roadmap?',calendar:'Local events',uid:'sample',start:'2026-10-23T10:00:00+08:00'};
   if(isObject(saved)) {
-    ['pattern','dailyPattern'].forEach(function(key){if(typeof saved[key]==='string'){try{CalendarPath.formatPath(saved[key],formatSample,saved.locale);settings[key]=saved[key];}catch(_){}}});
+    ['pattern','dailyPattern'].forEach(function(key){if(typeof saved[key]==='string'){try{if(key==='dailyPattern')EventCore.dailyPath(saved[key],formatSample,saved.locale);else CalendarPath.formatPath(saved[key],formatSample,saved.locale);settings[key]=saved[key];}catch(_){}}});
     if(['zh-tw','en'].includes(saved.locale))settings.locale=saved.locale;
     if(['comfortable','compact'].includes(saved.density))settings.density=saved.density;
     if(['5','15','30','60'].includes(saved.interval))settings.interval=saved.interval;
@@ -65,7 +65,7 @@
     if(isObject(loaded.dailyNotes))Object.keys(loaded.dailyNotes).forEach(function(key){var n=loaded.dailyNotes[key];if(isObject(n)&&typeof n.path==='string'&&typeof n.content==='string')data.dailyNotes[key]={path:n.path,content:n.content};});
     if(isObject(loaded.dailyLinks))Object.keys(loaded.dailyLinks).forEach(function(key){var link=loaded.dailyLinks[key];if(isObject(link)&&typeof link.path==='string'&&typeof link.bullet==='string')data.dailyLinks[key]={path:link.path,bullet:link.bullet};});
   }
-  var state={view:'week',date:m('2026-10-23T12:00:00+08:00'),selected:null,noteTab:'event',editing:null,suppressClickUntil:0};
+  var state={view:'week',date:m('2026-10-23T12:00:00+08:00'),selected:null,dailyDate:null,dailyKey:null,noteTab:'event',editing:null,suppressClickUntil:0};
   var toastTimer,drag=null;
   function toast(message) { $('#toast').textContent=message;$('#toast').classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(function(){$('#toast').classList.remove('visible');},3800); }
   function saveSettings(message) { var ok=persist('calendar-note-settings-v1',settings);if(message)toast(ok?message:'Browser storage is unavailable; you can still use this page.'); }
@@ -90,8 +90,9 @@
   var iconDoc='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H5v18h14V8zM14 3v6h5M8 13h8M8 17h6"/></svg>';
   function renderSidebar() {
     var page=document.body.dataset.page,mini='',first=state.date.clone().startOf('month').isoWeekday(1),selectedStart=weekStart(state.date).format('YYYY-MM-DD'),selectedEnd=weekStart(state.date).add(6,'days').format('YYYY-MM-DD');
-    ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(function(d){mini+='<span class="mini-weekday">'+d+'</span>';});
-    for(var i=0;i<42;i++){var day=first.clone().add(i,'days'),date=day.format('YYYY-MM-DD');mini+='<button class="mini-day '+(day.month()!==state.date.month()?'outside ':'')+(date==='2026-10-23'?'today ':'')+(date>=selectedStart&&date<=selectedEnd?'selected-week':'')+'" data-mini-date="'+date+'" aria-label="Go to '+day.format('MMM D')+'">'+day.date()+'</button>';}
+    mini+='<span class="mini-weekday week-gutter-heading" title="ISO 8601 week number">Wk</span>';
+    ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].forEach(function(d){mini+='<span class="mini-weekday" title="'+d+'" aria-label="'+d+'">'+d.slice(0,2)+'</span>';});
+    for(var i=0;i<42;i++){var day=first.clone().add(i,'days'),date=day.format('YYYY-MM-DD'),weekLabel=EventCore.isoWeekLabel(iso(day));if(i%7===0)mini+='<span class="mini-week-number" aria-label="ISO week '+weekLabel+'" title="ISO week '+weekLabel+'"><span>'+day.isoWeekYear()+'</span><span>W'+String(day.isoWeek()).padStart(2,'0')+'</span></span>';mini+='<button class="mini-day '+(day.month()!==state.date.month()?'outside ':'')+(date==='2026-10-23'?'today ':'')+(date>=selectedStart&&date<=selectedEnd?'selected-week':'')+'" data-mini-date="'+date+'" aria-label="Navigate calendar to '+day.format('MMMM D, YYYY')+'" title="Navigate calendar to '+day.format('MMMM D, YYYY')+'">'+day.date()+'</button>';}
     function sourceToggle(s,enabled) {return '<label class="subscription-toggle" style="--source-color:'+s.color+'"><input type="checkbox" data-source-toggle="'+esc(s.id)+'" '+(enabled?'checked':'')+'><span>'+esc(s.name)+'</span><span class="source-count">'+allEvents().filter(function(e){return e.source===s.id;}).length+'</span></label>';}
     $('#sidebar').innerHTML='<a href="index.html" class="brand" aria-label="Calendar-Note home"><svg class="brand-icon" viewBox="0 0 36 38" fill="none" aria-hidden="true"><path d="M7 7h19l5 5v21H7z" fill="#e8e0f1"/><path d="M4 5h22v26H4z" fill="#967bb7"/><path d="M4 11h22M9 2v6M21 2v6" stroke="#f8f4fc" stroke-width="1.8" stroke-linecap="round"/><path d="M9 17h5v5H9zM17 17h5M17 21h5M9 26h13" stroke="#fff" stroke-width="1.3"/><path d="m23 28 6-7 3 3-6 7-4 1z" fill="#bea7d3" stroke="#f5effa"/></svg><span>Calendar-Note</span></a><div class="workspace-label">PERSONAL VAULT</div><nav class="nav-links" aria-label="Main navigation"><a class="nav-item '+(page==='calendar'?'active':'')+'" href="index.html" aria-label="Weekly calendar">'+iconCalendar+'<span>Weekly calendar</span></a><a class="nav-item '+(page==='settings'?'active':'')+'" href="settings.html" aria-label="Settings">'+iconSettings+'<span>Settings</span></a><a class="nav-item" href="../proposal.html" aria-label="Product proposal">'+iconDoc+'<span>Product proposal</span></a></nav><div class="mini-calendar"><div class="mini-header"><span>'+state.date.format('MMMM YYYY')+'</span><span>· · ·</span></div><div class="mini-grid">'+mini+'</div></div><div class="sidebar-section"><div class="sidebar-heading"><span>My calendars</span><a href="settings.html#subscriptions" aria-label="Manage subscriptions">＋</a></div>'+sourceToggle(localSource,settings.localEnabled)+settings.sources.map(function(s){return sourceToggle(s,s.enabled);}).join('')+(!settings.sources.length?'<p class="no-subscriptions">No iCal subscriptions · Local features ready</p>':'')+'</div><div class="sidebar-bottom"><span class="sync-dot"></span>Local demo · Browser storage<p>No external connections · Vault unchanged</p></div>';
     $$('[data-source-toggle]').forEach(function(input){input.addEventListener('change',function(){if(input.dataset.sourceToggle==='local')settings.localEnabled=input.checked;else {var s=settings.sources.find(function(x){return x.id===input.dataset.sourceToggle;});if(!s.url&&input.checked){input.checked=false;toast('This subscription is a draft. Add a URL to enable it. Local events remain available.');return;}s.enabled=input.checked;}saveSettings();if(page==='calendar')renderCalendar();else renderSources();});});
@@ -116,25 +117,25 @@
     var end=start.clone().add(state.view==='month'?1:state.view==='day'?1:7,state.view==='month'?'month':'days');
     var relevant=visibleEvents().filter(function(e){return dayOf(e)>=start.format('YYYY-MM-DD')&&dayOf(e)<end.format('YYYY-MM-DD');});
     $('#month-title').textContent=state.date.format('MMMM YYYY');
-    $('#date-range').textContent=state.view==='month'?state.date.format('YYYY / M'):state.view==='day'?start.format('MMM D'):start.format('MMM D')+' – '+end.clone().subtract(1,'day').format(start.month()===end.clone().subtract(1,'day').month()?'D':'MMM D');
+    var weekReference=state.view==='day'?state.date:start;
+    $('#date-range').textContent=state.view==='month'?state.date.format('YYYY / M'):state.view==='day'?start.format('MMM D, YYYY')+' · ISO '+EventCore.isoWeekLabel(iso(weekReference)):start.format('MMM D')+' – '+end.clone().subtract(1,'day').format(start.month()===end.clone().subtract(1,'day').month()?'D':'MMM D')+' · ISO '+EventCore.isoWeekLabel(iso(weekReference));
     $$('[data-view]').forEach(function(b){b.classList.toggle('active',b.dataset.view===state.view);b.setAttribute('aria-pressed',String(b.dataset.view===state.view));});
     var html='';
     if(state.view==='list') {
       html='<div class="list-view">';
-      for(var li=0;li<7;li++){var listDay=start.clone().add(li,'days'),group=relevant.filter(function(e){return dayOf(e)===listDay.format('YYYY-MM-DD');}).sort(function(a,b){return a.start.localeCompare(b.start);});if(group.length)html+='<h3 class="list-day">'+listDay.locale('en').format('MMMM D · dddd')+'</h3>'+group.map(function(e){return '<button class="list-event" data-event="'+esc(eventKey(e))+'"><time>'+timeText(e)+'</time><span class="color-dot" style="--source-color:'+sourceOf(e).color+'"></span><strong>'+esc(e.title)+'</strong><span class="list-source">'+esc(sourceName(e))+(e.localOverride?' · Local changes':'')+'</span><span style="color:#927ca3">'+(hasNote(e)?'▤':'↗')+'</span></button>';}).join('');}
-      if(!relevant.length)html+='<div class="list-empty">No events this week yet.<br><small>Use “New event” to give your time a starting point.</small></div>';
+      for(var li=0;li<7;li++){var listDay=start.clone().add(li,'days'),group=relevant.filter(function(e){return dayOf(e)===listDay.format('YYYY-MM-DD');}).sort(function(a,b){return a.start.localeCompare(b.start);});html+='<h3 class="list-day"><button class="date-open" data-open-daily="'+listDay.format('YYYY-MM-DD')+'" aria-label="Open Daily Note for '+listDay.format('MMMM D, YYYY')+'">'+listDay.locale('en').format('MMMM D · dddd')+'</button></h3>'+(group.length?group.map(function(e){return '<button class="list-event" data-event="'+esc(eventKey(e))+'"><time>'+timeText(e)+'</time><span class="color-dot" style="--source-color:'+sourceOf(e).color+'"></span><strong>'+esc(e.title)+'</strong><span class="list-source">'+esc(sourceName(e))+(e.localOverride?' · Local changes':'')+'</span><span style="color:#927ca3">'+(hasNote(e)?'▤':'↗')+'</span></button>';}).join(''):'<p class="list-day-empty">No events · Open this date’s Daily Note</p>');}
       html+='</div>';
     } else if(state.view==='month') {
-      html='<div class="calendar-scroll"><div class="month-head">'+['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(function(d){return '<span>'+d+'</span>';}).join('')+'</div><div class="month-grid">';
+      html='<div class="calendar-scroll"><div class="month-head"><span class="week-gutter-heading" title="ISO 8601 week number">Wk</span>'+['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(function(d){return '<span>'+d+'</span>';}).join('')+'</div><div class="month-grid">';
       var monthStart=weekStart(start);
-      for(var mi=0;mi<42;mi++){var d=monthStart.clone().add(mi,'days'),day=d.format('YYYY-MM-DD');html+='<div class="month-cell '+(d.month()!==state.date.month()?'outside':'')+'"><button class="month-date '+(day==='2026-10-23'?'today':'')+'" data-day="'+day+'" aria-label="Open '+d.format('MMM D')+' day view">'+d.date()+'</button>'+visibleEvents().filter(function(e){return dayOf(e)===day;}).map(function(e){return '<button class="month-event" data-event="'+esc(eventKey(e))+'" style="--event-color:'+sourceOf(e).color+'">'+(e.allDay?'All day':m(e.start).format('HH:mm'))+' '+esc(e.title)+'</button>';}).join('')+'</div>';}
+      for(var mi=0;mi<42;mi++){var d=monthStart.clone().add(mi,'days'),day=d.format('YYYY-MM-DD');if(mi%7===0)html+='<div class="month-week-number" title="ISO week '+EventCore.isoWeekLabel(iso(d))+'">'+EventCore.isoWeekLabel(iso(d))+'</div>';html+='<div class="month-cell '+(d.month()!==state.date.month()?'outside':'')+'"><button class="month-date '+(day==='2026-10-23'?'today':'')+'" data-open-daily="'+day+'" aria-label="Open Daily Note for '+d.format('MMMM D, YYYY')+'">'+d.date()+'</button>'+visibleEvents().filter(function(e){return dayOf(e)===day;}).map(function(e){return '<button class="month-event" data-event="'+esc(eventKey(e))+'" style="--event-color:'+sourceOf(e).color+'">'+(e.allDay?'All day':m(e.start).format('HH:mm'))+' '+esc(e.title)+'</button>';}).join('')+'</div>';}
       html+='</div></div>';
     } else {
       var count=state.view==='day'?1:7,minHour=8,maxHour=19;
       relevant.filter(function(e){return !e.allDay;}).forEach(function(e){minHour=Math.min(minHour,m(e.start).hour());var ending=m(e.end).diff(m(e.start).startOf('day'),'minutes')/60;maxHour=Math.max(maxHour,Math.ceil(ending));});
       maxHour=Math.min(24,maxHour);var gridHeight=(maxHour-minHour)*60;
       html='<div class="calendar-scroll"><div class="week-wrap" style="--days:'+count+';'+(count===1?'min-width:400px;':'')+'--grid-height:'+gridHeight+'px"><div class="calendar-head"><div class="head-zone">GMT+8</div>';
-      for(var h=0;h<count;h++){var hd=start.clone().add(h,'days');html+='<div class="day-heading '+(hd.format('YYYY-MM-DD')==='2026-10-23'?'is-today ':'')+(hd.isoWeekday()>5?'weekend':'')+'"><div class="day-name">'+['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][hd.day()]+'</div><div class="day-number">'+hd.date()+'</div></div>';}
+      for(var h=0;h<count;h++){var hd=start.clone().add(h,'days');html+='<div class="day-heading '+(hd.format('YYYY-MM-DD')==='2026-10-23'?'is-today ':'')+(hd.isoWeekday()>5?'weekend':'')+'"><button class="date-open" data-open-daily="'+hd.format('YYYY-MM-DD')+'" aria-label="Open Daily Note for '+hd.format('MMMM D, YYYY')+'"><span class="day-name">'+['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][hd.day()]+'</span><span class="day-number">'+hd.date()+'</span></button></div>';}
       html+='</div><div class="all-day-grid"><div class="all-day-label">All day</div>';
       for(var a=0;a<count;a++){var ad=start.clone().add(a,'days').format('YYYY-MM-DD');html+='<div class="all-day-cell">'+relevant.filter(function(e){return e.allDay&&dayOf(e)===ad;}).map(function(e){return '<button class="all-day-event" data-event="'+esc(eventKey(e))+'" style="--event-color:'+sourceOf(e).color+'">'+esc(e.title)+'</button>';}).join('')+'</div>';}
       html+='</div><div class="time-grid"><div class="time-labels">';for(var t=minHour;t<maxHour;t++)html+='<span class="time-label" style="--hour:'+(t-minHour)+'">'+String(t).padStart(2,'0')+':00</span>';html+='</div>';
@@ -149,9 +150,9 @@
       if(!relevant.length)html+='<div class="empty-week"><h3>Make room for new ideas.</h3><p>Click an empty time slot to create a local event. No iCal required.</p></div>';
     }
     $('#calendar').innerHTML=html;bindEventButtons($('#calendar'));bindTimeGrid();
-    $$('[data-day]').forEach(function(b){b.addEventListener('click',function(){state.date=m(b.dataset.day+'T12:00:00+08:00');state.view='day';renderCalendar();renderSidebar();});});
+    $$('[data-open-daily]').forEach(function(b){b.addEventListener('click',function(){openDailyDate(b.dataset.openDaily);});});
     if(previousScroll&&$('.calendar-scroll')){$('.calendar-scroll').scrollTop=previousScroll.top;$('.calendar-scroll').scrollLeft=previousScroll.left;}
-    if(!state.selected)renderAgenda();
+    if(!state.selected&&!state.dailyDate)renderAgenda();
   }
   function renderAgenda() {
     var agendaDay=state.date.clone().startOf('day'),items=visibleEvents().filter(function(e){return dayOf(e)===agendaDay.format('YYYY-MM-DD');}).sort(function(a,b){return a.start.localeCompare(b.start);});
@@ -177,6 +178,24 @@
     diary.content=updated.content;data.dailyLinks[key]={path:diary.path,bullet:updated.bullet};
     return {created:!existing,note:notes[key],daily:diary};
   }
+  function renderDirectDailyPanel() {
+    var diary=data.dailyNotes[state.dailyKey];
+    if(!diary){state.dailyDate=null;state.dailyKey=null;renderAgenda();return;}
+    var date=m(state.dailyDate+'T12:00:00+08:00');
+    $('#note-panel').innerHTML='<div class="panel-topline"><span class="panel-label">▤ Daily Note · Calendar date</span><button id="close-note" class="icon-button" aria-label="Close Daily Note">×</button></div><div class="note-content"><h2>'+date.format('MMMM D, YYYY')+'</h2><div class="note-meta">'+date.format('dddd')+' · Asia/Taipei (UTC+8)</div><div class="note-path"><span>DAILY NOTE · VAULT-RELATIVE PATH (SIMULATED)</span><code>'+esc(diary.path)+'</code></div><div class="editor-label"><label for="note-editor">DAILY NOTE · READ-ONLY PREVIEW</label><span>'+ (storageAvailable?'Stored in this browser':'Available for this page only') +'</span></div><textarea class="note-editor daily-editor" id="note-editor" spellcheck="false" readonly aria-label="Daily Note read-only Markdown preview">'+esc(diary.content)+'</textarea><div class="note-actions"><button class="button primary" id="download-note">↓ Download Daily .md</button></div><p class="simulation-note">This browser prototype stores the note in your browser only. It does not write to your Vault. Opening a date does not create an event or an Event Note.</p></div>';
+    $('#close-note').addEventListener('click',function(){var date=state.dailyDate;state.dailyDate=null;state.dailyKey=null;renderCalendar();var button=$('[data-open-daily="'+date+'"]');if(button)button.focus();});
+    $('#download-note').addEventListener('click',function(){var current=data.dailyNotes[state.dailyKey],url=URL.createObjectURL(new Blob([current.content],{type:'text/markdown;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download=current.path.split('/').pop();a.click();setTimeout(function(){URL.revokeObjectURL(url);},500);toast('Downloaded the complete Markdown note');});
+  }
+  function openDailyDate(dateText) {
+    try {
+      var day=m(dateText+'T12:00:00+08:00');
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(dateText)||!day.isValid()||day.format('YYYY-MM-DD')!==dateText)throw new Error('Choose a valid calendar date.');
+      var opened=EventCore.ensureDirectDailyNote(data.dailyNotes,notes,settings.dailyPattern,dateText,settings.locale);
+      saveData();state.date=day;state.selected=null;state.dailyDate=dateText;state.dailyKey=opened.key;
+      renderCalendar();renderSidebar();renderDirectDailyPanel();
+      requestAnimationFrame(function(){if(window.matchMedia('(max-width: 1250px)').matches)$('#note-panel').scrollIntoView({behavior:'smooth',block:'start'});$('#close-note').focus({preventScroll:true});});
+    } catch(error){toast(error.message);}
+  }
   function renderNotePanel(e,artifacts) {
     var note=artifacts.note,diary=artifacts.daily,isDaily=state.noteTab==='daily',documentNote=isDaily?diary:note,parsed=EventCore.splitFrontmatter(note.content);
     $('#note-panel').innerHTML='<div class="panel-topline"><span class="panel-label">▤ '+(isDaily?'Daily Note · Event date':'Event Note · Local demo')+'</span><button id="close-note" class="icon-button" aria-label="Close note">×</button></div><div class="note-content"><span class="note-source"><span class="color-dot" style="--source-color:'+sourceOf(e).color+'"></span>'+esc(sourceName(e))+(e.localOverride?'<span class="override-badge">Local changes only</span>':'')+'</span><h2>'+esc(e.title)+'</h2><div class="note-meta">'+m(e.start).locale('en').format('MMM D (ddd)')+' · '+timeText(e)+'</div><div class="note-tabs" role="tablist" aria-label="Note type"><button id="tab-event" role="tab" aria-selected="'+!isDaily+'" class="'+(!isDaily?'active':'')+'">Event Note</button><button id="tab-daily" role="tab" aria-selected="'+isDaily+'" class="'+(isDaily?'active':'')+'">Daily Note <span>'+m(e.start).format('MM/DD')+'</span></button></div><div class="note-path"><span>'+(isDaily?'DAILY NOTE FOR THE EVENT DATE':'EVENT NOTE')+' · VAULT-RELATIVE PATH (SIMULATED)</span><code>'+esc(documentNote.path)+'</code></div>'+(isDaily?'<div class="daily-link-status">✓ Linked in ## Event. Reopening does not add a duplicate.</div>':'<details class="frontmatter-details"><summary>Event properties · '+parsed.yaml.split('\n').length+' lines</summary><pre>'+esc(parsed.yaml)+'</pre></details>')+'<div class="editor-label"><label for="note-editor">'+(isDaily?'DAILY NOTE · READ-ONLY PREVIEW':'MARKDOWN NOTE')+'</label><span id="note-save-state">'+(isDaily?'Existing Journal content preserved':'Saved automatically in this browser')+'</span></div><textarea class="note-editor '+(isDaily?'daily-editor':'')+'" id="note-editor" spellcheck="false" '+(isDaily?'readonly':'')+' aria-label="'+(isDaily?'Daily Note read-only preview':'Event Note Markdown content')+'">'+esc(isDaily?diary.content:parsed.body)+'</textarea><div class="note-actions"><button class="button primary" id="download-note">↓ Download '+(isDaily?'Daily':'Event')+' .md</button><button class="button" id="edit-event-time">Adjust time</button></div><button class="note-detail-link" id="event-details">View event details ↗</button><p class="simulation-note">This browser prototype stores events and notes in your browser only. It does not write to your Vault. '+(e.source==='local'?'':'Changes to subscribed events create local overrides and leave remote iCal unchanged.')+'</p></div>';
@@ -191,7 +210,7 @@
   }
   function openNote(e,options) {
     if(!e)return;options=options||{};
-    try {var artifacts=withTransaction(function(){return ensureArtifacts(e);});saveData();state.selected=eventKey(e);if(options.resetTab)state.noteTab='event';renderNotePanel(e,artifacts);renderCalendar();if(options.scroll!==false&&window.matchMedia('(max-width: 1250px)').matches)requestAnimationFrame(function(){$('#note-panel').scrollIntoView({behavior:'smooth',block:'start'});$('#tab-'+state.noteTab).focus({preventScroll:true});});if(artifacts.created&&!options.quiet)toast('Created Event Note and linked it to the Daily Note for '+m(e.start).format('MMM D'));}
+    try {var artifacts=withTransaction(function(){return ensureArtifacts(e);});saveData();if(state.dailyDate||options.resetTab)state.noteTab='event';state.dailyDate=null;state.dailyKey=null;state.selected=eventKey(e);renderNotePanel(e,artifacts);renderCalendar();if(options.scroll!==false&&window.matchMedia('(max-width: 1250px)').matches)requestAnimationFrame(function(){$('#note-panel').scrollIntoView({behavior:'smooth',block:'start'});$('#tab-'+state.noteTab).focus({preventScroll:true});});if(artifacts.created&&!options.quiet)toast('Created Event Note and linked it to the Daily Note for '+m(e.start).format('MMM D'));}
     catch(err){toast(err.message);}
   }
   function showDetails(e) {
@@ -224,7 +243,7 @@
       else {data.overrides[eventKey(e)]={start:range.start,end:range.end,allDay:false};updated.localOverride=true;}
       ensureArtifacts(updated);
     });
-    saveData();renderCalendar();renderSidebar();if(state.selected===eventKey(e))openNote(updated,{quiet:true,scroll:false});return updated;
+    saveData();renderCalendar();renderSidebar();if(state.selected===eventKey(e))openNote(updated,{quiet:true,scroll:false});else if(state.dailyDate)renderDirectDailyPanel();return updated;
   }
   function bindTimeGrid() {
     $$('.day-column').forEach(function(column){
@@ -309,7 +328,7 @@
   $$('[data-close-dialog]').forEach(function(button){button.addEventListener('click',function(){button.closest('dialog').close();});});
   $$('dialog').forEach(function(dialog){dialog.addEventListener('click',function(ev){if(ev.target===dialog){var rect=dialog.getBoundingClientRect();if(ev.clientX<rect.left||ev.clientX>rect.right||ev.clientY<rect.top||ev.clientY>rect.bottom)dialog.close();}});});
   document.addEventListener('pointerdown',function(ev){if(!ev.target.closest('#event-context-menu'))hideContext(false);});
-  document.addEventListener('keydown',function(ev){if(ev.key==='Escape'){if($('#event-context-menu')&&!$('#event-context-menu').hidden){hideContext(true);return;}if(state.selected&&!document.querySelector('dialog[open]')){state.selected=null;renderCalendar();}}});
+  document.addEventListener('keydown',function(ev){if(ev.key==='Escape'){if($('#event-context-menu')&&!$('#event-context-menu').hidden){hideContext(true);return;}if((state.selected||state.dailyDate)&&!document.querySelector('dialog[open]')){var date=state.dailyDate;state.selected=null;state.dailyDate=null;state.dailyKey=null;renderCalendar();if(date){var button=$('[data-open-daily="'+date+'"]');if(button)button.focus();}}}});
   window.addEventListener('resize',function(){hideContext(false);});
   if(!storageAvailable)toast('Local storage is unavailable; you can still use this page.');
 })();

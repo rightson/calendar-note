@@ -9,6 +9,10 @@
     return result.utcOffset(480);
   }
   function iso(value) { return date(value).format('YYYY-MM-DDTHH:mm:ssZ'); }
+  function isoWeekLabel(value) {
+    var day = date(value);
+    return day.isoWeekYear() + '-W' + String(day.isoWeek()).padStart(2, '0');
+  }
   function stableKey(event) {
     return event.source === 'local' ? 'local|' + event.uid : event.source + '|' + event.uid + '|' + (event.originalStart || event.start);
   }
@@ -47,7 +51,19 @@
     return '---'+parsed.newline+lines.join(parsed.newline)+parsed.newline+'---'+parsed.newline+parsed.body;
   }
   function safeAlias(title) { return String(title).replace(/[\[\]|#\r\n]/g,' ').replace(/\s+/g,' ').trim() || 'Untitled event'; }
-  function dailyPath(pattern, event, locale) { return pathLib.formatPath(pattern,{title:event.title,calendar:event.calendar||'Local events',uid:event.uid,start:event.start},locale); }
+  function dailyPath(pattern, event, locale) { return pathLib.formatPath(pattern,{start:event.start},locale,{dateOnly:true}); }
+  function ensureDirectDailyNote(dailyNotes, eventNotes, pattern, dateText, locale) {
+    if (typeof dateText !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dateText)) throw new Error('Choose a valid calendar date.');
+    var selected;
+    try { selected=date(dateText+'T12:00:00+08:00'); }
+    catch (_) { throw new Error('Choose a valid calendar date.'); }
+    if (selected.format('YYYY-MM-DD') !== dateText) throw new Error('Choose a valid calendar date.');
+    var path=dailyPath(pattern,{start:iso(selected)},locale),key=path.normalize('NFC').toLowerCase();
+    if (Object.values(eventNotes).some(function(note){return note.path.normalize('NFC').toLowerCase()===key;})) throw new Error('The Daily Note path matches an existing Event Note. Update the path settings; existing content is preserved.');
+    var created=!dailyNotes[key];
+    if (created) dailyNotes[key]={path:path,content:'# '+dateText+'\n\n## Journal\n\n'};
+    return {key:key,note:dailyNotes[key],created:created};
+  }
   function dailyBullet(event,notePath) {
     var from=date(event.start),to=date(event.end),time=event.allDay?'All day':from.format('HH:mm')+'–'+(to.date()!==from.date()?'24:00':to.format('HH:mm'));
     return '- '+time+' [['+notePath.replace(/\.md$/i,'')+'|'+safeAlias(event.title)+']]';
@@ -113,6 +129,6 @@
     var source=sources.find(function(s){return s.id===event.source;});
     return Boolean(source&&source.enabled&&source.url);
   }
-  var api={stableKey:stableKey,validateInterval:validateInterval,resizeInterval:resizeInterval,splitFrontmatter:splitFrontmatter,updateFrontmatter:updateFrontmatter,safeAlias:safeAlias,dailyPath:dailyPath,dailyBullet:dailyBullet,headings:headings,removeTrackedBullet:removeTrackedBullet,upsertDailyEvent:upsertDailyEvent,layoutOverlaps:layoutOverlaps,isEventVisible:isEventVisible};
+  var api={stableKey:stableKey,isoWeekLabel:isoWeekLabel,dailyPath:dailyPath,ensureDirectDailyNote:ensureDirectDailyNote,validateInterval:validateInterval,resizeInterval:resizeInterval,splitFrontmatter:splitFrontmatter,updateFrontmatter:updateFrontmatter,safeAlias:safeAlias,dailyBullet:dailyBullet,headings:headings,removeTrackedBullet:removeTrackedBullet,upsertDailyEvent:upsertDailyEvent,layoutOverlaps:layoutOverlaps,isEventVisible:isEventVisible};
   if(node)module.exports=api;else root.EventCore=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

@@ -13,7 +13,7 @@
 <main>
 <div class="eyebrow">PRODUCT PROPOSAL · UPDATED 2026.10.23 · DRAFT</div>
 <h1>Plan your time.<br>Keep the story in your notes.</h1>
-<p class="lead">Calendar-Note is an Obsidian calendar built around Event Notes. Create, overlap, and reschedule local events without iCal. Click an event to open its note and add a link to the Daily Note for that event's date.</p>
+<p class="lead">Calendar-Note is an Obsidian calendar built around Event Notes. Create, overlap, and reschedule local events without iCal. See ISO week numbers, click a date to open its Daily Note, or click an event to open its Event Note and add a link to the Daily Note for that event's date.</p>
 <div class="actions"><a class="button primary" href="preview/index.html">Preview calendar →</a><a class="button" href="preview/settings.html">Preview settings →</a><a class="button" href="#daily">Daily Notes integration</a><a class="button" href="#acceptance">Acceptance criteria</a></div>
 <div class="note"><strong>This deliverable is a proposal and a local interactive HTML prototype.</strong> Events, Event Notes, Daily Notes, and settings are stored in the browser, with Markdown downloads available. The prototype does not fetch iCal or write to an Obsidian Vault. Planned plugin behavior is distinguished from prototype coverage. Drafts live in <code>docs/changes/calendar-note/</code>; after finalization, move them and their assets to <code>docs/specs/</code> and update the links.</div>
 <div class="flow">
@@ -22,11 +22,13 @@
 <div class="card"><span class="num">03 / CONNECT</span><b>Link back to the right day</b><p>Click yesterday's event to add its note link under Event in yesterday's Daily Note. The click date does not determine the journal date.</p></div>
 </div>
 <h2>User story and V1 scope</h2>
-<p>As an Obsidian user, you want to plan local events in a weekly calendar and optionally subscribe to external calendars. Clicking any event should open its note and create an entry in the correct Daily Note. Rescheduling must preserve the same Event Note.</p>
+<p>As an Obsidian user, you want to plan local events in a weekly calendar and optionally subscribe to external calendars. Clicking any event should open its note and create an entry in the correct Daily Note. Rescheduling must preserve the same Event Note. You also want to see week numbers and open the Daily Note for any calendar date, including dates without events.</p>
 <div class="table-wrap"><table>
 <thead><tr><th>Requirement</th><th>V1 behavior</th><th>Boundary</th></tr></thead>
 <tbody>
 <tr><td>Default weekly view</td><td>A seven-day calendar, starting on Monday by default, with Today, previous, next, and refresh controls.</td><td>Match TaskNotes week, month, day, year, custom-day, and list displays, including all-day, cross-day, overlapping events, and a current-time indicator. The HTML demonstrates week, month, day, and list.</td></tr>
+<tr><td>ISO week numbers</td><td>Show the ISO week-year and week number in week, day, and list views, and beside each row in the month and sidebar calendars.</td><td>Use Monday-based ISO 8601 weeks in every date locale. Week 1 contains the first Thursday. Keep the week-year visible around New Year; January 1, 2027 belongs to 2026-W53.</td></tr>
+<tr><td>Click a date</td><td>Open or create that date's Daily Note from the main week/day date headings, month date buttons, and list date headings.</td><td>Works without events or enabled sources. Keep the active view, select the clicked date, and do not create an Event Note or event link. Sidebar dates remain calendar navigation.</td></tr>
 <tr><td>Optional iCal</td><td>All local features work with zero subscriptions or blank URLs: creation, notes, Daily Notes linking, resizing, and browsing.</td><td>The local source always exists. There is no blocking subscription setup. Blank URLs do not poll, produce connection errors, or affect other sources.</td></tr>
 <tr><td>Create from an empty slot</td><td>Click a week/day time slot to open a creation dialog with the selected date and time prefilled. Enter a title and start/end times.</td><td>Default to one hour with a configurable 15-minute snap interval. Canceling creates nothing. Missing titles and invalid intervals cannot be submitted.</td></tr>
 <tr><td>Create overlapping events</td><td>Right-click an empty slot or an existing event and choose to create an event at the pointer's time.</td><td>No uncovered area is required. Overlapping events appear side by side. Provide keyboard access and a New event button.</td></tr>
@@ -35,11 +37,21 @@
 <tr><td>Flexible note paths</td><td>Event Note paths use Moment date formatting plus event variables. The default filename is the sanitized event title.</td><td>Daily Notes use their own folder and custom format, independently of Event Note naming.</td></tr>
 <tr><td>Compact frontmatter</td><td>Store a stable event ID, start, and end. Add source references only when needed.</td><td>Collapse properties by default. Do not embed descriptions, attendees, duplicate titles, or full ICS payloads in frontmatter.</td></tr>
 </tbody></table></div>
-<p class="small">Requirements come from the user's initial request and follow-up. Monday as the first day, a 15-minute snap interval, one-hour default duration, and 15-minute polling are adjustable proposal defaults.</p>
+<p class="small">Requirements come from the user's initial request and follow-up. ISO numbering and Monday-aligned calendar rows are the proposed week convention. The 15-minute snap interval, one-hour default duration, and 15-minute polling remain adjustable proposal defaults.</p>
+<h2 id="calendar-dates">Week numbers and date navigation</h2>
+<p>Week numbers help users relate dates to weekly planning. Use one fixed ISO convention in V1 rather than adding another setting: weeks start on Monday, and week 1 contains January 4 (equivalently, the first Thursday). The date locale changes date formatting, not week numbering. A week label includes its ISO week-year, such as <code>2026-W43</code>. December 28, 2026 through January 3, 2027 is <code>2026-W53</code>; January 4 starts <code>2027-W01</code>.</p>
+<ul>
+<li><strong>Week, day, and list:</strong> Show the selected period's ISO week label next to the date range. In day view, use the week containing the selected day.</li>
+<li><strong>Month:</strong> Add a narrow week-number gutter aligned with each Monday-to-Sunday row, including rows containing dates outside the displayed month. Use the same convention in the sidebar mini calendar.</li>
+<li><strong>Main calendar dates:</strong> Date headings in week/day, date numbers in month, and date headings in list are keyboard-accessible buttons labeled to open a Daily Note. List view includes all seven date headings, with an empty state for days without events.</li>
+<li><strong>Navigation:</strong> Clicking a main date selects it and opens its Daily Note while retaining the current view. The Day control can then show that selected date. Today, previous/next, and sidebar date buttons remain navigation; sidebar date labels explicitly describe that action. Week numbers are informational.</li>
+</ul>
+<p>Opening a date resolves the Daily Note from that calendar date in the display time zone, independently of event visibility or subscriptions. Reuse the core Daily Notes folder, format, and template when enabled, or Calendar-Note's fallback settings otherwise. Open an existing file without modifying it; create a missing file and folders using those settings. Do not create an Event Note, add an Event section, or insert an event bullet just because a date was clicked. A configured template may contain its own sections.</p>
+<p>Daily Note formats use date tokens and literal text, without event variables such as <code>{title}</code>, <code>{calendar}</code>, or <code>{uid}</code>. Resolve both entry points from the selected day at midnight in the display zone so even time tokens cannot split one date into different files. Event Note formats retain their event variables and start times. The HTML prototype uses its independently saved Daily Note format and date locale, fixed to Asia/Taipei. A missing date note starts with a date heading and a Journal section. Its panel shows the selected date, resolved path, read-only Markdown, download, and close actions, without event controls or an event-link success message. Repeated clicks reuse the same stored content. If multiple dates resolve to the same custom path, open that shared file and preserve its original content. Reject invalid paths and collisions with Event Notes without altering existing notes. Dates with no events and dates outside the displayed month use the same workflow. The preview stores notes in the browser only.</p>
 <h2 id="daily">Daily Notes integration</h2>
 <p>Use <strong>the event's effective start date in the display time zone</strong>, rather than the date of the click. For example, clicking an October 22 event on October 23 must update <code>Daily Notes/2026-10-22.md</code>. All-day events retain their original date without a time-zone conversion that shifts the day.</p>
 <ol>
-<li>Ensure that the Event Note exists before resolving the Daily Note. When core Daily Notes is enabled, reuse its folder, custom format, and template. Create missing folders and journal files.</li>
+<li>For an event click, ensure that the Event Note exists before resolving the Daily Note. When core Daily Notes is enabled, reuse its folder, custom format, and template. Create missing folders and journal files.</li>
 <li>When core Daily Notes is disabled, use Calendar-Note's Daily Note path setting, defaulting to <code>[Daily Notes]/YYYY-MM-DD</code>. Other plugins are not prerequisites.</li>
 <li>Find <code>## Event</code>. If absent, append that section to the body. If present, append the bullet within it, before the next heading at the same or a higher level. Preserve existing text and other sections.</li>
 <li>The bullet links to the Event Note and includes the event time. Reopening the same event updates the same entry. Different events retain separate links even when their titles match.</li>
@@ -121,16 +133,16 @@ Existing journal content stays here.</pre></div></div>
 </div>
 <p>Both reference projects use MIT licenses. Preserve their copyright and license notices when reusing code. The standalone plugin does not import their full task-board or Bases-query architectures.</p>
 <pre>Obsidian Plugin
-  ├─ CalendarView         Display, slot/context creation, resize, and overlap layout
+  ├─ CalendarView         ISO weeks, date-note entry points, events, resize, and overlap layout
   ├─ EventNoteService     Stable IDs, compact frontmatter, note creation and opening
-  ├─ DailyNoteService     Date paths, templates, Event sections, deduplication, moves
+  ├─ DailyNoteService     Direct date opening, paths, templates, Event sections, deduplication, moves
   ├─ NotePathResolver     Moment, variables, safe filenames, Vault path validation
   ├─ SubscriptionService Optional sources, polling, cache, and failure states
   ├─ ICalParser           Recurrence, exceptions, zones, and effective-time merging
   └─ SettingsTab          Both note paths, optional subscriptions, display settings</pre>
 <h2>Implementation order and documentation lifecycle</h2>
 <ol>
-<li><strong>Complete the subscription-free core.</strong> Implement slot/context creation, three required frontmatter fields, one Event Note per event, and a bullet in the correct Daily Note.</li>
+<li><strong>Complete the subscription-free core.</strong> Implement ISO week labels, direct date-to-Daily-Note opening, slot/context creation, three required frontmatter fields, one Event Note per event, and a bullet in the correct Daily Note.</li>
 <li><strong>Add time editing and consistency.</strong> Implement both resize edges, precise dialog input, overlap layout, stable identity, journal moves between dates, and retry or rollback after failed writes.</li>
 <li><strong>Add iCal.</strong> Implement per-source cache, recurrence exceptions, zones, local overrides, and upstream conflict indicators without breaking local workflows.</li>
 <li><strong>Match display behavior and package the plugin.</strong> Compare all six TaskNotes views with the same fixtures. Validate desktop, narrow screens, and keyboard access.</li>
@@ -140,6 +152,10 @@ Existing journal content stays here.</pre></div></div>
 <h2 id="acceptance">Acceptance criteria</h2>
 <ul class="checklist">
 <li><strong>No iCal:</strong> With all URLs cleared, create local events and both note types, edit times, and reload persisted data.</li>
+<li><strong>ISO weeks:</strong> Week/day/list labels and month/sidebar row gutters use the same ISO week-year. December 28, 2026 and January 1–3, 2027 show 2026-W53; January 4 shows 2027-W01, regardless of date locale.</li>
+<li><strong>Date entry points:</strong> Activate week/day date headings, month dates (including adjacent-month dates), and every list date heading by mouse or keyboard. Open that date's Daily Note and retain the view. Day view follows the selected date; sidebar date buttons still navigate.</li>
+<li><strong>Dates without events:</strong> With no events, no subscriptions, or all sources hidden, every main date remains usable. Opening a date creates only a missing Daily Note, adds no Event section or event link, and leaves Event Notes and events unchanged.</li>
+<li><strong>Direct Daily Note preservation:</strong> Reopening, reloading, and opening through an event all reuse the resolved Daily Note. Preserve existing Markdown, event links, and shared-path content. Use the saved Daily Note format and locale with a midnight date anchor; different events on one date resolve to the same file as a date click. Reject event placeholders, invalid paths, or Event Note collisions without overwriting files.</li>
 <li><strong>Past events:</strong> Clicking an October 22 event on October 23 adds a link only to the October 22 Daily Note's Event section.</li>
 <li><strong>Journal preservation:</strong> Create missing journals/sections; append without replacing existing bullets or following sections. Reopening an event leaves one entry.</li>
 <li><strong>Creation entry points:</strong> Empty slots prefill the correct time. Right-clicking a covered slot can create a second or third event.</li>
