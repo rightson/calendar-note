@@ -31,6 +31,7 @@ export interface Interval {
 export type WeekMode = 'calendar' | 'iso';
 export type WeekStart = 'locale' | 'sunday' | 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday';
 export type NoteProvider = 'calendar-note' | 'daily-notes' | 'periodic-notes' | 'calendar';
+export type EventPropertiesDefault = 'obsidian' | 'collapsed' | 'expanded';
 
 export interface WeekRules {
   locale: string;
@@ -41,6 +42,7 @@ export interface WeekRules {
 export interface PluginSettings extends WeekRules {
   sources: CalendarSource[];
   eventPattern: string;
+  eventPropertiesDefault: EventPropertiesDefault;
   dailyFolder: string;
   dailyFormat: string;
   dailyTemplate: string;

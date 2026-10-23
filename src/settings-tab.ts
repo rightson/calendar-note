@@ -2,7 +2,7 @@ import { Notice, PluginSettingTab, Setting, type App } from 'obsidian';
 import moment from 'moment-timezone';
 import type CalendarNotePlugin from './main';
 import type { CalendarSource, PluginSettings } from './types';
-import { resolveDailySettings, resolveWeeklySettings } from './settings';
+import { isEventPropertiesDefault, resolveDailySettings, resolveWeeklySettings } from './settings';
 import { dailyNotePath, eventNotePath, weeklyNotePath, folderPath } from './paths';
 
 const sample = { id: 'local|sample', sourceId: 'local', uid: 'sample', title: 'Sample event', start: '2026-10-23T09:00:00+08:00', end: '2026-10-23T10:00:00+08:00', allDay: false };
@@ -13,6 +13,7 @@ export function validatePluginSettings(app: App, settings: PluginSettings): { ev
   if (!Number.isInteger(settings.defaultDurationMinutes) || settings.defaultDurationMinutes < 15 || settings.defaultDurationMinutes > 1440) throw new Error('Default duration must be 15–1440 minutes.');
   if (!Number.isInteger(settings.syncIntervalMinutes) || settings.syncIntervalMinutes < 1 || settings.syncIntervalMinutes > 1440) throw new Error('Sync interval must be 1–1440 minutes.');
   if (!Number.isInteger(settings.customDays) || settings.customDays < 2 || settings.customDays > 14) throw new Error('Custom days must be 2–14.');
+  if (!isEventPropertiesDefault(settings.eventPropertiesDefault)) throw new Error('Choose a valid Event Note Properties default.');
   folderPath(settings.dailyFolder); folderPath(settings.weeklyFolder);
   const event = eventNotePath(sample, 'Local', settings);
   const daily = dailyNotePath('2026-10-23', app, settings);
@@ -43,6 +44,9 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
     root.createEl('h3', { text: 'Note paths' });
     this.text(root, 'Event Note pattern', 'Moment date tokens, {title}, {calendar}, and {uid}.', 'eventPattern');
     root.createEl('p', { text: 'Sample: ' + eventNotePath(sample, 'Local', settings), cls: 'setting-item-description' });
+    this.dropdown(root, 'Event Note Properties', 'eventPropertiesDefault', [
+      ['obsidian', 'Follow Obsidian'], ['collapsed', 'Collapsed'], ['expanded', 'Expanded'],
+    ], 'Initial Properties state when an Event Note opens. You can toggle it in the note.');
     const daily = resolveDailySettings(this.app, settings);
     root.createEl('p', { text: `Daily Notes provider: ${daily.provider}`, cls: 'setting-item-description' });
     this.text(root, 'Daily fallback folder', 'Used when core Daily Notes is disabled.', 'dailyFolder');
@@ -121,8 +125,10 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
       input.inputEl.addEventListener('keydown', e => { if (e.key === 'Enter') input.inputEl.blur(); });
     });
   }
-  private dropdown(root: HTMLElement, name: string, key: 'weekMode' | 'weekStart' | 'snapMinutes', values: [string, string][]): void {
-    new Setting(root).setName(name).addDropdown(select => {
+  private dropdown(root: HTMLElement, name: string, key: 'weekMode' | 'weekStart' | 'snapMinutes' | 'eventPropertiesDefault', values: [string, string][], description?: string): void {
+    const setting = new Setting(root).setName(name);
+    if (description) setting.setDesc(description);
+    setting.addDropdown(select => {
       for (const [value, label] of values) select.addOption(value, label);
       select.setValue(String(this.plugin.store.state.settings[key]));
       select.onChange(value => {

@@ -5,7 +5,7 @@ import { resolveDailySettings, resolveWeeklySettings, resolveWeekRules } from '.
 import { pathKey, type NoteLink } from './state';
 import { CalendarStore, type PlannedWrite } from './store';
 import type { CalendarEvent, Interval, PluginSettings } from './types';
-import { addEventBullet, eventBullet, hasTrackedBullet, newEventNote, parseEventNote, removeTrackedBullet, replaceRenamedBullet, validateInterval, writeEventFrontmatter } from './notes';
+import { addEventBullet, eventBullet, hasTrackedBullet, newEventNote, parseEventNote, removeDuplicateEventNoteTitle, removeTrackedBullet, replaceRenamedBullet, validateInterval, writeEventFrontmatter } from './notes';
 
 export interface EventWritePlan {
   writes: PlannedWrite[];
@@ -215,6 +215,23 @@ export class EventNoteService {
   }
 
   async indexLocal(): Promise<CalendarEvent[]> { return (await this.scanEvents()).filter(event => event.sourceId === 'local'); }
+
+  async removeDuplicateTitle(path: string): Promise<boolean> {
+    return this.serialized(async () => {
+      if (!/\.md$/i.test(path)) return false;
+      const before = await this.store.io.read(path);
+      if (before === null) return false;
+      let note: ReturnType<typeof parseEventNote>;
+      try { note = parseEventNote(before, path); }
+      catch { return false; }
+      if (!note) return false;
+      const after = removeDuplicateEventNoteTitle(before, path);
+      if (after === before) return false;
+      if (await this.findEventPath(note.id) !== path) return false;
+      await this.store.commit([{ path, before, after, type: 'event', ownerId: note.id }], () => undefined);
+      return true;
+    });
+  }
 
   async createLocal(input: { title: string; start: string; end: string; allDay?: boolean }): Promise<CalendarEvent> {
     return this.serialized(async () => {

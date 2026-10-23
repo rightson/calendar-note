@@ -1,10 +1,11 @@
 import type { App } from 'obsidian';
-import type { PluginSettings, ResolvedNoteSettings, WeekRules, WeekStart } from './types';
+import type { EventPropertiesDefault, PluginSettings, ResolvedNoteSettings, WeekRules, WeekStart } from './types';
 import { normalizeSidebarWidth, SIDEBAR_DEFAULT_WIDTH } from './sidebar-layout';
 
 export const DEFAULT_SETTINGS: PluginSettings = {
   sources: [],
   eventPattern: '[Calendar Notes]/{title}',
+  eventPropertiesDefault: 'collapsed',
   dailyFolder: 'Daily Notes',
   dailyFormat: 'YYYY-MM-DD',
   dailyTemplate: '',
@@ -38,7 +39,13 @@ export function normalizePluginSettings(raw: unknown, fallback: PluginSettings =
     sidebarWidth: normalizeSidebarWidth(input.sidebarWidth, fallback.sidebarWidth),
     sidebarCollapsed: typeof input.sidebarCollapsed === 'boolean' ? input.sidebarCollapsed : fallback.sidebarCollapsed,
     workdaysOnly: typeof input.workdaysOnly === 'boolean' ? input.workdaysOnly : fallback.workdaysOnly,
+    eventPropertiesDefault: isEventPropertiesDefault(input.eventPropertiesDefault)
+      ? input.eventPropertiesDefault : fallback.eventPropertiesDefault,
   } as PluginSettings;
+}
+
+export function isEventPropertiesDefault(value: unknown): value is EventPropertiesDefault {
+  return value === 'obsidian' || value === 'collapsed' || value === 'expanded';
 }
 
 /** Internal plugin settings are feature-detected because Obsidian does not expose a public provider API. */

@@ -91,6 +91,21 @@ export function newEventNote(event: CalendarEvent, notePath?: string): string {
   return writeEventFrontmatter(`# ${heading}\n\n`, event);
 }
 
+/** Remove an exact duplicate filename heading from a recognized Event Note only. */
+export function removeDuplicateEventNoteTitle(content: string, path: string): string {
+  let note: ParsedEventNote | null;
+  try { note = parseEventNote(content, path); }
+  catch { return content; }
+  if (!note) return content;
+  const fm = splitFrontmatter(content);
+  const heading = /^((?:[ \t]*\r?\n)*)# ([^\r\n]*)(?:\r?\n|$)/.exec(fm.body);
+  if (!heading) return content;
+  const basename = path.split('/').pop()?.replace(/\.md$/i, '');
+  if (!basename || heading[2].normalize('NFC') !== basename.normalize('NFC')) return content;
+  const bodyStart = content.length - fm.body.length;
+  return content.slice(0, bodyStart + heading[1].length) + content.slice(bodyStart + heading[0].length);
+}
+
 export function eventBullet(event: CalendarEvent, notePath: string, zone: string): string {
   const from = dateAt(event.start, zone);
   const to = dateAt(event.end, zone);

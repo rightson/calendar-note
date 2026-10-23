@@ -1,5 +1,7 @@
 import { Modal, Notice, Plugin, TFile, requestUrl } from 'obsidian';
 import { CalendarNoteView, CALENDAR_VIEW_TYPE } from './calendar-view';
+import { calendarOpenModeForClick, openCalendarLeaf, type CalendarOpenMode } from './calendar-open';
+import { EventPropertiesController } from './event-properties';
 import { ChangeHistoryModal } from './modals';
 import { CalendarNoteSettingTab } from './settings-tab';
 import { DEFAULT_SETTINGS } from './settings';
@@ -13,6 +15,7 @@ import { historyForReview, type ChangeHistoryEntry } from './history';
 import type { CalendarEvent, Interval, PluginSettings } from './types';
 import type { CalendarRange } from './ical';
 import { dateAt } from './date';
+import { isEventNoteFrontmatter } from './event-properties-state';
 
 export default class CalendarNotePlugin extends Plugin {
   store!: CalendarStore;
@@ -28,6 +31,7 @@ export default class CalendarNotePlugin extends Plugin {
   private ready = false;
   private lastDiagnostics = '';
   private restoreRenameFile?: () => void;
+  private eventProperties?: EventPropertiesController;
 
   async onload(): Promise<void> {
     const state = normalizeState(await this.loadData(), DEFAULT_SETTINGS);
@@ -38,6 +42,12 @@ export default class CalendarNotePlugin extends Plugin {
       new Notice('Calendar-Note recovery needs attention. Open the calendar and choose Retry recovery.');
     }
     this.notes = new EventNoteService(this.app, this.store, () => this.store.state.settings);
+    this.eventProperties = new EventPropertiesController(
+      this.app,
+      () => this.store.state.settings.eventPropertiesDefault,
+      file => this.isEventNote(file),
+    );
+    this.eventProperties.start(this);
     this.sync = new SourceSyncService(this.store, this.notes);
     this.subscriptions = new SubscriptionService(this.store, this.sync, async (url, headers) => {
       const result = await requestUrl({ url, headers, method: 'GET', throw: false });
@@ -45,9 +55,20 @@ export default class CalendarNotePlugin extends Plugin {
     });
     this.store.onChange = () => { this.updateEventsFromCache(); this.refreshViews(); };
     this.registerView(CALENDAR_VIEW_TYPE, leaf => new CalendarNoteView(leaf, this));
-    this.addRibbonIcon('calendar-days', 'Open Calendar-Note', () => void this.openCalendar());
-    this.addCommand({ id: 'open-calendar', name: 'Open calendar', callback: () => void this.openCalendar() });
+    this.addRibbonIcon('calendar-days', 'Open Calendar-Note', evt => void this.openCalendar(calendarOpenModeForClick(evt)));
+    this.addCommand({ id: 'open-calendar', name: 'Open calendar in new tab', callback: () => void this.openCalendar('tab') });
+    this.addCommand({ id: 'open-calendar-right', name: 'Open calendar in right split', callback: () => void this.openCalendar('right-split') });
     this.addCommand({ id: 'new-event', name: 'New event', callback: () => void this.openCalendar().then(view => view.newEvent()) });
+    this.addCommand({ id: 'remove-duplicate-event-title', name: 'Remove duplicate Event Note title', checkCallback: checking => {
+      const file = this.app.workspace.getActiveFile();
+      if (!(file instanceof TFile) || file.extension !== 'md' || !this.isEventNote(file)) return false;
+      if (checking) return true;
+      void this.runAction(async () => {
+        const removed = await this.notes.removeDuplicateTitle(file.path);
+        new Notice(removed ? 'Removed the duplicate Event Note title.' : 'This Event Note has no duplicate title to remove.');
+      });
+      return true;
+    } });
     this.addCommand({ id: 'refresh', name: 'Refresh calendars', callback: () => void this.refresh(true) });
     this.addCommand({ id: 'change-history', name: 'Show change history', callback: () => this.showHistory() });
     this.addCommand({ id: 'retry-recovery', name: 'Retry pending recovery', callback: () => void this.retryRecovery() });
@@ -89,6 +110,7 @@ export default class CalendarNotePlugin extends Plugin {
 
   onunload(): void {
     this.disposed = true;
+    this.eventProperties?.dispose();
     this.restoreRenameFile?.();
     if (this.scanTimer) window.clearTimeout(this.scanTimer);
     this.subscriptions?.dispose();
@@ -110,13 +132,12 @@ export default class CalendarNotePlugin extends Plugin {
   }
   eventById(id: string): CalendarEvent | undefined { return this.events.find(event => event.id === id); }
 
-  async openCalendar(): Promise<CalendarNoteView> {
-    let leaf = this.app.workspace.getLeavesOfType(CALENDAR_VIEW_TYPE)[0];
-    if (!leaf) {
-      leaf = this.app.workspace.getLeaf('tab');
-      await leaf.setViewState({ type: CALENDAR_VIEW_TYPE, active: true });
-    }
-    await this.app.workspace.revealLeaf(leaf);
+  private isEventNote(file: TFile): boolean {
+    return isEventNoteFrontmatter(this.app.metadataCache.getFileCache(file)?.frontmatter);
+  }
+
+  async openCalendar(mode: CalendarOpenMode = 'tab'): Promise<CalendarNoteView> {
+    const leaf = await openCalendarLeaf(this.app.workspace, CALENDAR_VIEW_TYPE, mode);
     return leaf.view as CalendarNoteView;
   }
 
@@ -190,7 +211,9 @@ export default class CalendarNotePlugin extends Plugin {
   }
 
   async saveSettings(settings: PluginSettings): Promise<void> {
+    const previousPropertiesDefault = this.store.state.settings.eventPropertiesDefault;
     await this.store.commit([], state => { state.settings = settings; });
+    if (settings.eventPropertiesDefault !== previousPropertiesDefault) this.eventProperties?.settingsChanged();
     for (const view of this.getViews()) view.settingsChanged();
     this.subscriptions.dispose();
     this.subscriptions = new SubscriptionService(this.store, this.sync, async (url, headers) => {

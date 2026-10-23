@@ -5,7 +5,7 @@ import { CalendarStore, type RecoveryJournal, type StoreIO } from '../src/store'
 import { freshState } from '../src/state';
 import { DEFAULT_SETTINGS } from '../src/settings';
 import type { App } from 'obsidian';
-import { addEventBullet, newEventNote, parseEventNote, validateInterval, writeEventFrontmatter } from '../src/notes';
+import { addEventBullet, newEventNote, parseEventNote, removeDuplicateEventNoteTitle, validateInterval, writeEventFrontmatter } from '../src/notes';
 import { emptySourceCache } from '../src/history';
 import { sourceEventId } from '../src/ical';
 import type { CalendarEvent } from '../src/types';
@@ -275,8 +275,70 @@ test('Event Note H1 is generated only when its actual basename differs from the 
   const event = { id: 'local|one', sourceId: 'local', uid: 'one', title: 'Roadmap', start, end, allDay: false };
   assert.doesNotMatch(newEventNote(event, 'Calendar Notes/Roadmap.md'), /^# Roadmap/m);
   assert.equal(parseEventNote(newEventNote(event, 'Calendar Notes/Roadmap.md'), 'Calendar Notes/Roadmap.md')?.title, 'Roadmap');
-  assert.match(newEventNote({ ...event, title: 'A/B' }, 'Calendar Notes/A B.md'), /^# A\/B/m);
-  assert.match(newEventNote(event, 'Calendar Notes/2026-Roadmap.md'), /^# Roadmap/m);
+  const sanitized = newEventNote({ ...event, title: 'A/B' }, 'Calendar Notes/A B.md');
+  assert.match(sanitized, /^# A\/B/m);
+  const sanitizedParsed = parseEventNote(sanitized, 'Calendar Notes/A B.md');
+  assert.deepEqual([sanitizedParsed?.id, sanitizedParsed?.title], [event.id, 'A/B']);
+  const custom = newEventNote(event, 'Calendar Notes/2026-Roadmap.md');
+  assert.match(custom, /^# Roadmap/m);
+  const customParsed = parseEventNote(custom, 'Calendar Notes/2026-Roadmap.md');
+  assert.deepEqual([customParsed?.id, customParsed?.title], [event.id, event.title]);
+});
+
+test('duplicate Event Note title cleanup removes only an exact leading basename H1', () => {
+  const yaml = '---\r\nevent_id: "local|one"\r\nstart: "2026-10-22T10:00:00+08:00"\r\nend: "2026-10-22T11:00:00+08:00"\r\ncustom: keep\r\n---\r\n';
+  const body = '\r\n# Roadmap\r\n\r\n## Discussion\r\nHandwritten notes.\r\n';
+  const before = yaml + body;
+  const after = yaml + '\r\n\r\n## Discussion\r\nHandwritten notes.\r\n';
+  assert.equal(removeDuplicateEventNoteTitle(before, 'Calendar Notes/Roadmap.md'), after);
+  assert.equal(parseEventNote(after, 'Calendar Notes/Roadmap.md')?.id, 'local|one');
+  assert.equal(parseEventNote(after, 'Calendar Notes/Roadmap.md')?.title, 'Roadmap');
+  assert.equal(removeDuplicateEventNoteTitle(after, 'Calendar Notes/Roadmap.md'), after);
+});
+
+test('duplicate title cleanup leaves ordinary, custom-title, fenced, and non-leading content untouched', () => {
+  const fm = '---\nevent_id: "local|one"\nstart: "2026-10-22T10:00:00+08:00"\nend: "2026-10-22T11:00:00+08:00"\n---\n';
+  const path = 'Calendar Notes/Roadmap.md';
+  for (const body of [
+    '# Custom title\n\n## Notes\n',
+    '```md\n# Roadmap\n```\n',
+    'Handwritten intro\n# Roadmap\n',
+    '## Notes\n# Roadmap\n',
+    '# Roadmap  \n',
+    '# Roadmap ###\n',
+  ]) {
+    assert.equal(removeDuplicateEventNoteTitle(fm + body, path), fm + body);
+  }
+  assert.equal(removeDuplicateEventNoteTitle('# Roadmap\n', path), '# Roadmap\n');
+  assert.equal(removeDuplicateEventNoteTitle('---\nevent_id: other\n---\n# Roadmap\n', path),
+    '---\nevent_id: other\n---\n# Roadmap\n');
+  assert.equal(removeDuplicateEventNoteTitle(fm + '# Roadmap\n', 'Calendar Notes/Other.md'), fm + '# Roadmap\n');
+});
+
+test('explicit duplicate title cleanup changes one recognized Event Note and preserves other content', async () => {
+  const { io, service, store } = setup();
+  const event = await service.createLocal({ title: 'Roadmap', start, end });
+  const path = store.state.noteLinks[event.id].eventPath;
+  const original = io.files.get(path)!;
+  const legacy = original + '# Roadmap\n\n## Discussion\nA handwritten paragraph.\n';
+  io.files.set(path, legacy);
+  assert.equal(await service.removeDuplicateTitle(path), true);
+  assert.equal(io.files.get(path), original + '\n## Discussion\nA handwritten paragraph.\n');
+  assert.equal(await service.removeDuplicateTitle(path), false);
+  assert.equal(await service.removeDuplicateTitle(store.state.noteLinks[event.id].dailyPath), false);
+  assert.equal((await service.indexLocal()).find(item => item.id === event.id)?.title, 'Roadmap');
+});
+
+test('duplicate Event Note identities block explicit title cleanup without changing either note', async () => {
+  const { io, service, store } = setup();
+  const event = await service.createLocal({ title: 'Roadmap', start, end });
+  const path = store.state.noteLinks[event.id].eventPath;
+  const legacy = io.files.get(path)! + '# Roadmap\n';
+  io.files.set(path, legacy);
+  io.files.set('Calendar Notes/Roadmap copy.md', legacy);
+  await assert.rejects(service.removeDuplicateTitle(path), /Duplicate event_id/);
+  assert.equal(io.files.get(path), legacy);
+  assert.equal(io.files.get('Calendar Notes/Roadmap copy.md'), legacy);
 });
 
 test('renaming waits for FileManager link completion before changing the tracked Daily bullet', async () => {
