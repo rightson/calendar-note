@@ -14,7 +14,20 @@
     return day.isoWeekYear() + '-W' + String(day.isoWeek()).padStart(2, '0');
   }
   function stableKey(event) {
-    return event.source === 'local' ? 'local|' + event.uid : event.source + '|' + event.uid + '|' + (event.originalStart || event.start);
+    if(event.source === 'local') return 'local|' + event.uid;
+    var base=encodeURIComponent(event.source)+'|'+encodeURIComponent(event.uid);
+    var anchor=event.recurrenceId || event.recurrenceID || event.originalOccurrence;
+    if(!anchor)return base;
+    anchor=String(anchor);
+    // RECURRENCE-ID names the original occurrence even when DTSTART moves.
+    if(/T/.test(anchor)&&/(?:Z|[+-]\d{2}:?\d{2})$/i.test(anchor)){
+      var parsed=momentLib.parseZone(anchor,momentLib.ISO_8601,true);
+      if(parsed.isValid())anchor=parsed.toISOString();
+    }
+    return base+'|recurrence|'+encodeURIComponent(anchor);
+  }
+  function legacyImportedKey(event) {
+    return event.source === 'local' ? stableKey(event) : event.source+'|'+event.uid+'|'+(event.originalStart || event.start);
   }
   function validateInterval(start, end) {
     var from = date(start), to = date(end);
@@ -102,6 +115,9 @@
     var line=managedLines(content).find(function(item){return item.text===previousBullet;});
     return line?content.slice(0,line.start)+content.slice(line.after):content;
   }
+  function hasTrackedBullet(content, previousBullet) {
+    return Boolean(previousBullet && managedLines(content).some(function(line){return line.text===previousBullet;}));
+  }
   function upsertDailyEvent(content, event, notePath, previousBullet) {
     var bullet=dailyBullet(event,notePath);
     if(previousBullet===bullet&&managedLines(content).some(function(line){return line.text===bullet;}))return {content:content,bullet:bullet};
@@ -129,6 +145,6 @@
     var source=sources.find(function(s){return s.id===event.source;});
     return Boolean(source&&source.enabled&&source.url);
   }
-  var api={stableKey:stableKey,isoWeekLabel:isoWeekLabel,dailyPath:dailyPath,ensureDirectDailyNote:ensureDirectDailyNote,validateInterval:validateInterval,resizeInterval:resizeInterval,splitFrontmatter:splitFrontmatter,updateFrontmatter:updateFrontmatter,safeAlias:safeAlias,dailyBullet:dailyBullet,headings:headings,removeTrackedBullet:removeTrackedBullet,upsertDailyEvent:upsertDailyEvent,layoutOverlaps:layoutOverlaps,isEventVisible:isEventVisible};
+  var api={stableKey:stableKey,legacyImportedKey:legacyImportedKey,isoWeekLabel:isoWeekLabel,dailyPath:dailyPath,ensureDirectDailyNote:ensureDirectDailyNote,validateInterval:validateInterval,resizeInterval:resizeInterval,splitFrontmatter:splitFrontmatter,updateFrontmatter:updateFrontmatter,safeAlias:safeAlias,dailyBullet:dailyBullet,headings:headings,hasTrackedBullet:hasTrackedBullet,removeTrackedBullet:removeTrackedBullet,upsertDailyEvent:upsertDailyEvent,layoutOverlaps:layoutOverlaps,isEventVisible:isEventVisible};
   if(node)module.exports=api;else root.EventCore=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

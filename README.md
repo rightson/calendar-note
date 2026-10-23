@@ -2,7 +2,7 @@
 
 Calendar-Note is a proposed Obsidian calendar plugin built around Event Notes. Clicking an event opens its note and adds a link under the `Event` section of the Daily Note for that event's date. A prominent current-week button and clickable week numbers open editable Weekly Notes; clicking a calendar date opens its Daily Note. iCal subscriptions are optional: local events can be created and rescheduled without a subscription.
 
-The repository currently contains a product proposal and an interactive HTML prototype. The Obsidian plugin, live iCal fetching, and Vault writes have not been implemented.
+The repository currently contains a product proposal and an interactive HTML prototype. The prototype can simulate an incoming iCal date/time change against sample subscriptions and preview a local change history. The Obsidian plugin, live iCal fetching, and Vault writes have not been implemented.
 
 ## Proposal and previews
 
@@ -38,7 +38,9 @@ No dependency installation or build is required. Moment is bundled locally; the 
 7. **Check a past date.** Open the October 22 event and switch to its Daily Note. The link belongs to October 22, regardless of when you click.
 8. **Adjust the interval.** Drag the top edge to change the start or the bottom edge to change the end. A time-editing dialog provides precise input. The Event Note keeps its identity and path while its frontmatter and journal link are updated.
 9. **Inspect Markdown.** The three required event properties are collapsed by default. Preview or download either the Event Note or the Daily Note.
-10. **Optionally add subscriptions.** URL fields demonstrate settings only. Sample subscriptions must be loaded explicitly; the prototype does not fetch remote events.
+10. **Optionally add subscriptions.** Use **Load subscription examples** in Settings to add fictional sources. The prototype does not fetch remote events.
+11. **Preview a source change.** Choose **Simulate iCal change** and select an imported event with a revised start or end. The preview applies the simulated source data locally, updates a linked Event Note and its Daily Note entry when present, and records the outcome in Change history. No network request is made.
+12. **Review the change history.** Switch between **All** and **Needs review**, open the linked note, and mark a row reviewed to acknowledge it. Outcomes appear as **Applied automatically**, **Kept local time**, or **Needs attention**. A local time override remains effective until you choose **Use latest source times**; that choice records the resolution and updates the linked note and Daily Note entry.
 
 ## Paths and file format
 
@@ -95,10 +97,10 @@ The planned plugin will follow Calendar's effective provider: enabled Periodic N
 
 ## Data and limitations
 
-- Events, settings, and all three note types are stored in the current browser's localStorage. Markdown files are exported only when downloaded. Clearing browser storage resets the prototype.
+- Events, settings, change history, and all three note types are stored in the current browser's localStorage. Markdown files are exported only when downloaded. Clearing browser storage resets the prototype.
 - File URLs and HTTP URLs may use separate storage. If browser storage is unavailable, the current page remains usable, but changes may not survive a reload.
 - Use sample URLs. There are no live iCal requests, scheduled polling, Obsidian API calls, or remote writes.
-- Rescheduling an imported event creates a local override; it does not write back to the subscription provider.
+- Simulated imported-event changes and review history use browser storage only. The prototype does not fetch subscriptions, poll, write to a Vault, or write back to a provider. A local time override stays effective when a simulated source change arrives, and the history records that it was kept.
 - The prototype uses Asia/Taipei (UTC+8). Editing is limited to intervals within one calendar day, ending no later than the following midnight, with a minimum duration of 15 minutes. Full cross-day and DST handling remain part of the V1 specification.
 - The HTML supports week, month, day, and list views. Year and custom-day views, complete RRULE handling, and actual Vault writes remain planned plugin features.
 
@@ -114,18 +116,22 @@ Run from the repository root:
 node --check docs/changes/calendar-note/preview/app.js
 node --check docs/changes/calendar-note/preview/path-format.js
 node --check docs/changes/calendar-note/preview/event-core.js
+node --check docs/changes/calendar-note/preview/source-sync.js
 node --check docs/changes/calendar-note/preview/weekly-core.js
 node docs/changes/calendar-note/preview/smoke-test.cjs
 node docs/changes/calendar-note/preview/event-core.test.cjs
+node docs/changes/calendar-note/preview/source-sync.test.cjs
 node docs/changes/calendar-note/preview/daily-note.test.cjs
 node docs/changes/calendar-note/preview/weekly-note.test.cjs
 ```
 
-Week/date regression checks cover ISO and locale week-years, custom first weekdays, Weekly Note folder/format resolution, preservation/reload, shared paths, conflicts, and direct Daily Note resolution. Path tests cover Moment formats, locales, literal text, protected event variables, filename sanitization, Unicode byte limits, and relative paths. Event tests cover event-date journal paths, heading and code-fence boundaries, duplicate links, Markdown preservation, stable identity, overlap layout, and interval resizing.
+Week/date regression checks cover ISO and locale week-years, custom first weekdays, Weekly Note folder/format resolution, preservation/reload, shared paths, conflicts, and direct Daily Note resolution. Path tests cover Moment formats, locales, literal text, protected event variables, filename sanitization, Unicode byte limits, and relative paths. Event tests cover event-date journal paths, heading and code-fence boundaries, duplicate links, Markdown preservation, stable identity, overlap layout, and interval resizing. Source-sync tests cover stable imported-event keys, baselines, same-time accepted sequence metadata, revision deduplication, change history, local overrides, rollback/retry, and edited managed-bullet detection.
 
 A temporary DOM simulation was also used to check initialization, creation without subscriptions, past-date links, deduplication, moving journal entries between dates, three-way overlap, resize and cancellation handlers, context-menu times, blank URL drafts, reload persistence, and collision rollback. The DOM test package is not a project runtime dependency.
 
-Browser checks for this revision verified direct date opening in week, month, day, and list views; empty dates and hidden sources; keyboard activation; shared content between event and direct-date entry points; and saved custom path settings. Weekly checks verified the current-week CTA, sidebar keyboard activation, month-button activation with sources hidden, Markdown autosave across notes and reload, a custom nested path, blank-folder root output, ISO and English (US) week-years around New Year, the locked Monday selector in ISO mode, and Traditional Chinese weekday labels. Desktop and 390 px narrow layouts were inspected; the month calendar scrolls within its panel, and closing a Weekly Note returns visible focus to the This week button. Full browser drag-and-drop acceptance and actual Obsidian integration remain unverified; the core tests do not establish those behaviors.
+Earlier browser checks covered direct date opening in week/month/day/list views, empty dates, hidden sources, keyboard access, shared event/date content, and custom paths. Weekly checks covered This week and week-number entry points, autosave/reload, nested/root paths, ISO and locale week-years, and Traditional Chinese labels.
+
+Source-change checks verified an October 23→24 move kept the same Event Note path/body, moved its Daily Note link, and preserved the Journal; a local override remained effective until **Use latest source times** applied the latest range and moved the journal entry; and an unlinked import gained a history row without creating note artifacts. A simulated path collision preserved the accepted October 26 event, Event Note properties/body, and Daily Note; after fixing the path setting, Retry succeeded on that same history row. After a failed A→B update, accepted A→C→A revisions superseded the pending failure, and a later A→B created a new history row instead of reusing the failed one. Mark reviewed removed the superseded row from Needs review and the count while retaining it in All; this state persisted after reload. History toolbar activation with Enter and Space, dismissal with Escape, and visible focus return at 390 px were verified. Desktop 1440 px and mobile 390 px layouts showed no horizontal overflow. Real Obsidian integration, live polling, and Vault write/recovery behavior remain unverified; the source-change preview uses fictional fixtures and does not test a real iCal parser, provider, or Vault transaction.
 
 ## Documentation lifecycle
 

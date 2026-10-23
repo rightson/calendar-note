@@ -18,6 +18,16 @@ Open [the calendar](http://127.0.0.1:4318/docs/changes/calendar-note/preview/ind
 
 Use This week to open the current Weekly Note, or click a week number to open another week. Edit its Markdown, switch away, and reopen it to check autosave. Reload and open the same week to verify persistence. Download Markdown when you want a file outside the browser. Browser storage does not synchronize with Obsidian, and different origins may have separate stored notes.
 
+## Preview an iCal source change
+
+The prototype uses fictional sample subscriptions and does not make network requests. Choose **Load subscription examples** in the Settings preview, then use **Simulate iCal change** in the calendar. Select an imported event and enter its incoming start/end range. Applying the fixture updates the simulated source cache and, when the event is linked, its Event Note frontmatter and tracked Daily Note bullet. The Event Note keeps its path and body. The Change history view records source and effective ranges and the resulting note paths. An unlinked imported event shows **No Event Note yet** and **None** for Daily Note paths; the change does not create note artifacts.
+
+Use **All** or **Needs review** to filter history. **Open note** follows the recorded Event Note path. **Mark reviewed** acknowledges the row and keeps it in All. Outcomes are labeled **Applied automatically**, **Kept local time**, or **Needs attention**. A local override remains the effective calendar time when a simulated upstream change arrives; choose **Use latest source times** to clear only that time override and apply the latest source interval to the note and Daily Note entry. The action is recorded as a resolution. A **Retry** action appears only while the accepted source still matches the failed revision's baseline. If a newer accepted source supersedes a failed row, Retry disappears; Mark reviewed removes it from Needs review and the count, while the row stays in All.
+
+Browser-verified examples include a source change moving an event from October 23 to October 24 while preserving its Event Note path/body, moving the tracked Daily Note link, and retaining the Journal; resolving a local override using the latest source interval; and a path-collision failure that left the accepted calendar event, Event Note properties/body, and Daily Note unchanged before Retry succeeded on that same history row after fixing the path setting. Desktop 1440 px and mobile 390 px layouts were inspected without horizontal overflow. Broader failure/restart recovery and actual Obsidian Vault atomicity remain unverified.
+
+These controls exercise a local browser-storage transaction with fixture data. They do not parse remote ICS, poll on a schedule, synchronize with an Obsidian Vault, or prove the real plugin's recovery behavior.
+
 ## Match an existing Calendar Weekly Note
 
 The browser cannot discover installed Obsidian plugins. Enter matching values manually in the prototype settings:
@@ -89,6 +99,8 @@ node docs/changes/calendar-note/preview/weekly-note.test.cjs
 ```
 
 These checks exercise the prototype, not Obsidian integration. Once a plugin exists, separately verify opening an existing Calendar Weekly Note, missing-note creation with the provider's template, no duplicate file after reopening, cross-year locale/ISO naming, preserved user text, disabled-provider fallback, and write failures in the test Vault.
+
+For iCal integration in a future plugin build, use a controlled test feed or parsed fixtures and verify that matching a single event by source+UID or a recurring event by source+UID+original RECURRENCE-ID updates the same imported event, its managed Event Note times, and its Daily Note bullet without changing note body or unrelated journal content. Confirm identical polls add no history row, A→B→A adds two, local overrides stay effective until explicitly resolved, and **Use latest source times** records the resolution. Also exercise unlinked events, rewritten past bullets, path collisions, failed multi-file writes, retry/restart recovery, changed UIDs, ambiguous recurrence mappings, cancellations, invalid feeds, and events outside the visible range. Those checks require a real plugin and test Vault; they cannot be completed with this HTML preview.
 
 ## Troubleshooting
 
