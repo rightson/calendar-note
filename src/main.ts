@@ -1,0 +1,252 @@
+import { Modal, Notice, Plugin, TFile, requestUrl } from 'obsidian';
+import { CalendarNoteView, CALENDAR_VIEW_TYPE } from './calendar-view';
+import { ChangeHistoryModal } from './modals';
+import { CalendarNoteSettingTab } from './settings-tab';
+import { DEFAULT_SETTINGS } from './settings';
+import { normalizeState } from './state';
+import { CalendarStore, RecoveryConflict } from './store';
+import { createObsidianStoreIO } from './vault-adapter';
+import { EventNoteService } from './events';
+import { SubscriptionService } from './subscriptions';
+import { SourceSyncService } from './sync';
+import { historyForReview, type ChangeHistoryEntry } from './history';
+import type { CalendarEvent, Interval, PluginSettings } from './types';
+import type { CalendarRange } from './ical';
+import { dateAt } from './date';
+
+export default class CalendarNotePlugin extends Plugin {
+  store!: CalendarStore;
+  notes!: EventNoteService;
+  sync!: SourceSyncService;
+  subscriptions!: SubscriptionService;
+  events: CalendarEvent[] = [];
+  private range?: CalendarRange;
+  private scanTimer?: number;
+  private scanRunning = false;
+  private scanAgain = false;
+  private disposed = false;
+  private ready = false;
+  private lastDiagnostics = '';
+  private restoreRenameFile?: () => void;
+
+  async onload(): Promise<void> {
+    const state = normalizeState(await this.loadData(), DEFAULT_SETTINGS);
+    this.store = new CalendarStore(createObsidianStoreIO(this.app, this), state);
+    try { await this.store.recover(); }
+    catch {
+      this.store.recoveryConflict ??= new RecoveryConflict(['transaction journal']);
+      new Notice('Calendar-Note recovery needs attention. Open the calendar and choose Retry recovery.');
+    }
+    this.notes = new EventNoteService(this.app, this.store, () => this.store.state.settings);
+    this.sync = new SourceSyncService(this.store, this.notes);
+    this.subscriptions = new SubscriptionService(this.store, this.sync, async (url, headers) => {
+      const result = await requestUrl({ url, headers, method: 'GET', throw: false });
+      return { status: result.status, text: result.text, headers: result.headers };
+    });
+    this.store.onChange = () => { this.updateEventsFromCache(); this.refreshViews(); };
+    this.registerView(CALENDAR_VIEW_TYPE, leaf => new CalendarNoteView(leaf, this));
+    this.addRibbonIcon('calendar-days', 'Open Calendar-Note', () => void this.openCalendar());
+    this.addCommand({ id: 'open-calendar', name: 'Open calendar', callback: () => void this.openCalendar() });
+    this.addCommand({ id: 'new-event', name: 'New event', callback: () => void this.openCalendar().then(view => view.newEvent()) });
+    this.addCommand({ id: 'refresh', name: 'Refresh calendars', callback: () => void this.refresh(true) });
+    this.addCommand({ id: 'change-history', name: 'Show change history', callback: () => this.showHistory() });
+    this.addCommand({ id: 'retry-recovery', name: 'Retry pending recovery', callback: () => void this.retryRecovery() });
+    this.addSettingTab(new CalendarNoteSettingTab(this.app, this));
+    const changed = (file: TFile) => { if (file.extension === 'md') this.scheduleScan(); };
+    this.registerEvent(this.app.vault.on('create', file => { if (file instanceof TFile) changed(file); }));
+    this.registerEvent(this.app.vault.on('modify', file => { if (file instanceof TFile) changed(file); }));
+    this.registerEvent(this.app.vault.on('delete', file => { if (file instanceof TFile) changed(file); }));
+    this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
+      if (!(file instanceof TFile) || file.extension !== 'md') return;
+      void this.runAction(async () => { await this.notes.handleRename(file, oldPath); this.scheduleScan(); });
+    }));
+    this.registerEvent(this.app.metadataCache.on('changed', file => { if (file.extension === 'md') this.scheduleScan(); }));
+    // The Vault rename event fires before FileManager finishes rewriting
+    // wikilinks. Complete our tracked Daily entry only after that public
+    // renameFile Promise resolves, so both writers never race on offsets.
+    const manager = this.app.fileManager;
+    const originalRename = manager.renameFile;
+    const wrappedRename: typeof originalRename = async (file, newPath) => {
+      const result = await originalRename.call(manager, file, newPath);
+      if (!this.disposed && file instanceof TFile && file.extension === 'md') {
+        await this.runAction(async () => { await this.notes.finalizePendingRenames(file.path); this.scheduleScan(); });
+      }
+      return result;
+    };
+    manager.renameFile = wrappedRename;
+    this.restoreRenameFile = () => { if (manager.renameFile === wrappedRename) manager.renameFile = originalRename; };
+    this.registerDomEvent(window, 'focus', () => void this.refresh(false));
+    this.registerDomEvent(window, 'online', () => void this.refresh(false));
+    this.app.workspace.onLayoutReady(() => {
+      if (this.disposed) return;
+      this.ready = true;
+      void this.runAction(async () => { await this.notes.finalizePendingRenames(); }).then(() => this.rescan());
+      this.subscriptions.start();
+      if (this.range) void this.refresh(false);
+      if (this.store.recoveryConflict) this.showRecovery();
+    });
+  }
+
+  onunload(): void {
+    this.disposed = true;
+    this.restoreRenameFile?.();
+    if (this.scanTimer) window.clearTimeout(this.scanTimer);
+    this.subscriptions?.dispose();
+  }
+
+  private getViews(): CalendarNoteView[] {
+    return this.app.workspace.getLeavesOfType(CALENDAR_VIEW_TYPE)
+      .map(leaf => leaf.view).filter((view): view is CalendarNoteView => view instanceof CalendarNoteView);
+  }
+  private refreshViews(): void { for (const view of this.getViews()) view.refresh(); }
+  private updateEventsFromCache(): void {
+    const local = this.events.filter(event => event.sourceId === 'local');
+    const imports = this.subscriptions?.getEvents(this.range);
+    if (imports) {
+      const noteTitles = new Map(this.events.filter(event => event.sourceId !== 'local' && this.store.state.noteLinks[event.id])
+        .map(event => [event.id, event.title]));
+      this.events = [...local, ...imports.map(event => ({ ...event, title: noteTitles.get(event.id) ?? event.title }))];
+    }
+  }
+  eventById(id: string): CalendarEvent | undefined { return this.events.find(event => event.id === id); }
+
+  async openCalendar(): Promise<CalendarNoteView> {
+    let leaf = this.app.workspace.getLeavesOfType(CALENDAR_VIEW_TYPE)[0];
+    if (!leaf) {
+      leaf = this.app.workspace.getLeaf('tab');
+      await leaf.setViewState({ type: CALENDAR_VIEW_TYPE, active: true });
+    }
+    await this.app.workspace.revealLeaf(leaf);
+    return leaf.view as CalendarNoteView;
+  }
+
+  async onVisibleRange(range: CalendarRange): Promise<void> {
+    this.range = range;
+    if (!this.ready || this.store.recoveryConflict) return;
+    await this.runAction(async () => {
+      await this.subscriptions.setRange(range);
+      await this.subscriptions.refresh(range);
+      this.updateEventsFromCache(); this.refreshViews();
+    });
+  }
+
+  async refresh(force = false): Promise<void> {
+    if (!this.ready || this.store.recoveryConflict) return;
+    await this.runAction(async () => {
+      await this.rescan();
+      if (this.range) await this.subscriptions.refresh(this.range, { force });
+      this.updateEventsFromCache(); this.refreshViews();
+    });
+  }
+
+  private scheduleScan(): void {
+    if (!this.ready || this.disposed || this.store.recoveryConflict) return;
+    if (this.scanTimer) window.clearTimeout(this.scanTimer);
+    this.scanTimer = window.setTimeout(() => { this.scanTimer = undefined; void this.rescan(); }, 300);
+  }
+
+  private async rescan(): Promise<void> {
+    if (!this.ready || this.disposed || this.store.recoveryConflict) return;
+    if (this.scanRunning) { this.scanAgain = true; return; }
+    this.scanRunning = true;
+    try {
+      do {
+        this.scanAgain = false;
+        const scanned = await this.notes.scanEvents();
+        this.events = scanned;
+        this.updateEventsFromCache();
+        this.refreshViews();
+        const diagnostic = this.notes.diagnostics.join('\n');
+        if (diagnostic && diagnostic !== this.lastDiagnostics) new Notice('Calendar-Note found an invalid Event Note. Open its settings for the affected path.', 7000);
+        this.lastDiagnostics = diagnostic;
+      } while (this.scanAgain && !this.disposed);
+    } catch (error) { new Notice(error instanceof Error ? error.message : 'Could not scan Event Notes.'); }
+    finally { this.scanRunning = false; }
+  }
+
+  async runAction<T>(action: () => Promise<T>): Promise<T | undefined> {
+    try {
+      if (this.store.recoveryConflict) { this.showRecovery(); throw new Error('Resolve pending recovery before editing notes.'); }
+      return await action();
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : 'Calendar-Note action failed.');
+      return undefined;
+    }
+  }
+
+  async createLocal(title: string, interval: Interval): Promise<void> {
+    if (this.store.recoveryConflict) throw new Error('Resolve pending recovery before creating events.');
+    const event = await this.notes.createLocal({ title, ...interval });
+    this.events = [...this.events.filter(item => item.id !== event.id), event];
+    this.refreshViews();
+    this.scheduleScan();
+  }
+  async reschedule(event: CalendarEvent, interval: Interval): Promise<void> {
+    if (this.store.recoveryConflict) throw new Error('Resolve pending recovery before editing events.');
+    const updated = await this.notes.reschedule(event, interval);
+    this.events = this.events.map(item => item.id === updated.id ? updated : item);
+    this.refreshViews();
+    this.scheduleScan();
+  }
+
+  async saveSettings(settings: PluginSettings): Promise<void> {
+    await this.store.commit([], state => { state.settings = settings; });
+    for (const view of this.getViews()) view.settingsChanged();
+    this.subscriptions.dispose();
+    this.subscriptions = new SubscriptionService(this.store, this.sync, async (url, headers) => {
+      const result = await requestUrl({ url, headers, method: 'GET', throw: false });
+      return { status: result.status, text: result.text, headers: result.headers };
+    });
+    if (this.range) await this.subscriptions.setRange(this.range);
+    if (this.ready) this.subscriptions.start();
+    if (this.ready && this.range) await this.subscriptions.refresh(this.range);
+    this.scheduleScan();
+  }
+
+  showHistory(): void {
+    new ChangeHistoryModal(this.app, () => this.store.state.history, () => this.store.state.settings, {
+      openExisting: async entry => {
+        if (!entry.notePath) return;
+        const path = this.store.state.noteLinks[entry.eventId]?.eventPath ?? entry.notePath;
+        const file = this.app.vault.getAbstractFileByPath(path);
+        if (!(file instanceof TFile)) throw new Error('The linked Event Note is missing.');
+        await this.app.workspace.getLeaf(true).openFile(file);
+      },
+      review: async entry => { await this.sync.markReviewed(entry.id); },
+      retry: async entry => this.sync.retry(entry.id),
+      useLatest: async entry => this.sync.useLatestSourceTimes(entry.eventId),
+      canRetry: entry => this.canRetry(entry),
+      canUseLatest: entry => !!this.store.state.overrides[entry.eventId] &&
+        !!this.store.state.sourceCaches[entry.sourceId]?.accepted[entry.eventId],
+    }).open();
+  }
+  get reviewCount(): number { return historyForReview(this.store.state.history).length; }
+  private canRetry(entry: ChangeHistoryEntry): boolean {
+    const cache = this.store.state.sourceCaches[entry.sourceId];
+    const pending = cache?.pendingIncoming[entry.eventId];
+    return entry.status === 'needs_attention' && !this.store.state.overrides[entry.eventId] && !!pending && pending.historyId === entry.id &&
+      cache.accepted[entry.eventId]?.revision === pending.baselineRevision;
+  }
+
+  private showRecovery(): void {
+    const conflict = this.store.recoveryConflict;
+    if (!conflict) return;
+    const modal = new Modal(this.app);
+    modal.titleEl.setText('Calendar-Note recovery needs attention');
+    modal.contentEl.createEl('p', { text: 'These files changed during a pending transaction. Review them, then retry recovery. Calendar edits are paused until recovery succeeds.' });
+    const list = modal.contentEl.createEl('ul');
+    for (const path of conflict.paths) list.createEl('li', { text: path });
+    const retry = modal.contentEl.createEl('button', { text: 'Retry recovery', cls: 'mod-cta' });
+    retry.addEventListener('click', () => void this.retryRecovery().then(() => { if (!this.store.recoveryConflict) modal.close(); }));
+    modal.open();
+  }
+  async retryRecovery(): Promise<void> {
+    try {
+      await this.store.recover();
+      this.store.recoveryConflict = null;
+      new Notice('Calendar-Note recovery completed.');
+      await this.rescan();
+      if (this.range) await this.refresh(false);
+    } catch { this.showRecovery(); }
+  }
+}

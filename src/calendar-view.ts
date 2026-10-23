@@ -1,0 +1,532 @@
+import { ItemView, Notice, setIcon, type WorkspaceLeaf } from 'obsidian';
+import { Calendar, type EventClickArg, type EventDropArg, type EventInput } from '@fullcalendar/core';
+import dayGridPlugin from '@fullcalendar/daygrid';
+import timeGridPlugin from '@fullcalendar/timegrid';
+import listPlugin from '@fullcalendar/list';
+import multiMonthPlugin from '@fullcalendar/multimonth';
+import interactionPlugin, { type DateClickArg, type EventResizeDoneArg } from '@fullcalendar/interaction';
+import momentTimezonePlugin from '@fullcalendar/moment-timezone';
+import moment from 'moment-timezone';
+import { dateAt, weekInfo } from './date';
+import { resolveWeekRules } from './settings';
+import type { CalendarEvent, Interval, PluginSettings } from './types';
+import type CalendarNotePlugin from './main';
+import { EventModal } from './modals';
+import { visibleMonthCount } from './calendar-layout';
+import { sidebarWidthForContainer, resizeSidebarWithKeyboard } from './sidebar-layout';
+
+export const CALENDAR_VIEW_TYPE = 'calendar-note-calendar';
+export const CALENDAR_VIEWS = [
+  ['timeGridWeek', 'Week'], ['timeGridDay', 'Day'], ['dayGridMonth', 'Month'],
+  ['multiMonthYear', 'Year'], ['customDays', 'Custom days'], ['listWeek', 'List'],
+] as const;
+
+const isoDay = (date: Date, zone: string): string => dateAt(date, zone).format('YYYY-MM-DD');
+
+export class CalendarNoteView extends ItemView {
+  private calendar?: Calendar;
+  private miniEl?: HTMLElement;
+  private shellEl?: HTMLElement;
+  private sidebarEl?: HTMLElement;
+  private separatorEl?: HTMLElement;
+  private sidebarRestore?: HTMLButtonElement;
+  private workdaysToggle?: HTMLButtonElement;
+  private shellResizeObserver?: ResizeObserver;
+  private stopSidebarDrag?: () => void;
+  private miniNavTitle?: HTMLElement;
+  private periodEl?: HTMLElement;
+  private viewWeekEl?: HTMLButtonElement;
+  private historyEl?: HTMLButtonElement;
+  private listDatesEl?: HTMLElement;
+  private selectedDay?: string;
+  private miniMonth?: string;
+  private lastDragAt = 0;
+  private dateButtonObserver?: MutationObserver;
+  private miniResizeObserver?: ResizeObserver;
+  private miniResizeFrame?: number;
+  private layoutResizeFrame?: number;
+  private sidebarPersistTimer?: number;
+  private pendingSidebarWidth?: number;
+  private viewType = 'timeGridWeek';
+
+  constructor(leaf: WorkspaceLeaf, public readonly plugin: CalendarNotePlugin) { super(leaf); }
+  getViewType(): string { return CALENDAR_VIEW_TYPE; }
+  getDisplayText(): string { return 'Calendar-Note'; }
+  getIcon(): string { return 'calendar-days'; }
+
+  async onOpen(): Promise<void> {
+    const root = this.containerEl.children[1] as HTMLElement;
+    root.empty();
+    root.addClass('calendar-note-view');
+    const shell = root.createDiv({ cls: 'cn-shell' });
+    this.shellEl = shell;
+    this.sidebarRestore = shell.createEl('button', { cls: 'cn-sidebar-restore', attr: {
+      type: 'button', 'aria-label': 'Show calendar sidebar', title: 'Show calendar sidebar', 'aria-expanded': 'false',
+    } });
+    setIcon(this.sidebarRestore, 'panel-left-open');
+    this.sidebarRestore.addEventListener('click', () => void this.toggleSidebar());
+    const sidebar = shell.createDiv({ cls: 'cn-sidebar' });
+    this.sidebarEl = sidebar;
+    const miniHeading = sidebar.createDiv({ cls: 'cn-mini-heading' });
+    const miniPrev = miniHeading.createEl('button', { text: '‹', attr: { 'aria-label': 'Previous month' } });
+    this.miniNavTitle = miniHeading.createEl('span');
+    const miniToday = miniHeading.createEl('button', { text: 'Today', attr: { 'aria-label': 'Navigate calendar to today' } });
+    const miniNext = miniHeading.createEl('button', { text: '›', attr: { 'aria-label': 'Next month' } });
+    const miniCollapse = miniHeading.createEl('button', { text: '×', attr: { 'aria-label': 'Collapse calendar sidebar', title: 'Collapse calendar sidebar' } });
+    this.miniEl = sidebar.createDiv({ cls: 'cn-mini' });
+    this.miniMonth = dateAt(this.today(), this.settings.timeZone).startOf('month').format('YYYY-MM-DD');
+    miniPrev.addEventListener('click', () => { this.miniMonth = dateAt(this.miniMonth!, this.settings.timeZone).subtract(1, 'month').format('YYYY-MM-DD'); this.miniEl!.scrollTop = 0; this.renderMini(); });
+    miniNext.addEventListener('click', () => { this.miniMonth = dateAt(this.miniMonth!, this.settings.timeZone).add(1, 'month').format('YYYY-MM-DD'); this.miniEl!.scrollTop = 0; this.renderMini(); });
+    miniToday.addEventListener('click', () => this.navigateToday());
+    miniCollapse.addEventListener('click', () => void this.toggleSidebar());
+    this.miniNavTitle.title = 'Dates navigate the calendar. Week numbers open Weekly Notes.';
+    this.miniResizeObserver = new ResizeObserver(() => {
+      if (this.miniResizeFrame) cancelAnimationFrame(this.miniResizeFrame);
+      this.miniResizeFrame = requestAnimationFrame(() => { this.miniResizeFrame = undefined; this.renderMini(); });
+    });
+    this.miniResizeObserver.observe(this.miniEl);
+    this.separatorEl = shell.createDiv({ cls: 'cn-sidebar-resizer', attr: {
+      role: 'separator', tabindex: '0', 'aria-label': 'Resize calendar sidebar',
+      'aria-orientation': 'vertical', 'aria-valuemin': '200', 'aria-valuemax': '480',
+    } });
+    this.separatorEl.addEventListener('pointerdown', event => this.startSidebarDrag(event));
+    this.separatorEl.addEventListener('keydown', event => {
+      const width = resizeSidebarWithKeyboard(this.sidebarEl?.getBoundingClientRect().width ?? this.settings.sidebarWidth,
+        event.key, shell.clientWidth, event.shiftKey);
+      if (width === undefined) return;
+      event.preventDefault();
+      this.applySidebarLayout(width);
+      this.pendingSidebarWidth = width;
+      if (this.sidebarPersistTimer) window.clearTimeout(this.sidebarPersistTimer);
+      this.sidebarPersistTimer = window.setTimeout(() => {
+        this.sidebarPersistTimer = undefined;
+        const settledWidth = this.pendingSidebarWidth;
+        this.pendingSidebarWidth = undefined;
+        if (settledWidth !== undefined) void this.saveDisplaySettings({ sidebarWidth: settledWidth });
+      }, 180);
+    });
+    this.shellResizeObserver = new ResizeObserver(() => this.applySidebarLayout());
+    this.shellResizeObserver.observe(shell);
+    const content = shell.createDiv({ cls: 'cn-content' });
+    const toolbar = content.createDiv({ cls: 'cn-toolbar' });
+    const navigation = toolbar.createDiv({ cls: 'cn-navigation' });
+    this.button(navigation, 'Today', () => this.navigateToday());
+    this.button(navigation, '‹', () => this.calendar?.prev(), 'Previous period');
+    this.button(navigation, '›', () => this.calendar?.next(), 'Next period');
+    this.viewWeekEl = this.button(navigation, 'Week', () => {
+      const day = this.calendar ? isoDay(this.calendar.view.currentStart, this.settings.timeZone) : this.today();
+      void this.openWeek(day);
+    });
+    this.viewWeekEl.addClass('cn-view-week');
+    this.periodEl = navigation.createEl('strong', { cls: 'cn-period' });
+    const controls = toolbar.createDiv({ cls: 'cn-controls' });
+    this.workdaysToggle = this.button(controls, 'Workdays', () => void this.toggleWorkdays(), 'Show workdays only in the main calendar');
+    this.workdaysToggle.addClass('cn-workdays-toggle');
+    const views = controls.createEl('select', { attr: { 'aria-label': 'Calendar view' } });
+    for (const [id, label] of CALENDAR_VIEWS) views.createEl('option', { value: id, text: label });
+    views.value = this.viewType;
+    views.addEventListener('change', () => { this.viewType = views.value; this.calendar?.changeView(views.value, this.selectedDay); });
+    this.button(controls, 'New event', () => this.newEvent());
+    this.button(controls, 'Refresh', () => void this.plugin.refresh(true));
+    this.historyEl = this.button(controls, 'History', () => this.plugin.showHistory());
+    this.listDatesEl = content.createDiv({ cls: 'cn-list-dates' });
+    const grid = content.createDiv({ cls: 'cn-calendar' });
+    const rules = resolveWeekRules(this.app, this.settings);
+    this.calendar = new Calendar(grid, {
+      plugins: [dayGridPlugin, timeGridPlugin, listPlugin, multiMonthPlugin, interactionPlugin, momentTimezonePlugin],
+      initialView: this.viewType,
+      headerToolbar: false,
+      timeZone: this.settings.timeZone,
+      locale: 'en',
+      firstDay: this.firstDay(),
+      weekends: !this.settings.workdaysOnly,
+      weekNumbers: true,
+      weekNumberCalculation: date => weekInfo(date, rules, this.settings.timeZone).number,
+      weekNumberContent: arg => String(arg.num),
+      navLinks: false,
+      nowIndicator: true,
+      selectable: false,
+      editable: true,
+      eventResizableFromStart: true,
+      eventOverlap: true,
+      slotDuration: { minutes: this.settings.snapMinutes },
+      snapDuration: { minutes: this.settings.snapMinutes },
+      allDaySlot: true,
+      dayMaxEvents: true,
+      height: '100%',
+      scrollTime: '08:00:00',
+      views: {
+        timeGridWeek: { weekNumbers: false }, timeGridDay: { weekNumbers: false },
+        customDays: { type: 'timeGrid', duration: { days: this.settings.customDays }, weekNumbers: false },
+        listWeek: {},
+      },
+      events: (_range, success) => success(this.eventInputs()),
+      datesSet: info => {
+        this.periodEl?.setText(info.view.title);
+        const visibleStart = isoDay(info.start, this.settings.timeZone);
+        const visibleEnd = isoDay(info.end, this.settings.timeZone);
+        if (!this.selectedDay || this.selectedDay < visibleStart || this.selectedDay >= visibleEnd) {
+          this.selectedDay = isoDay(this.calendar?.getDate() ?? info.view.currentStart, this.settings.timeZone);
+        }
+        this.miniMonth = dateAt(this.selectedDay, this.settings.timeZone).startOf('month').format('YYYY-MM-DD');
+        this.renderMini();
+        if (this.viewWeekEl) {
+          const start = isoDay(info.view.currentStart, this.settings.timeZone);
+          const week = weekInfo(start, resolveWeekRules(this.app, this.settings), this.settings.timeZone);
+          const show = info.view.type === 'timeGridWeek' || info.view.type === 'customDays';
+          this.viewWeekEl.style.display = show ? '' : 'none';
+          this.viewWeekEl.setText(`Week ${week.number}`);
+          const label = `${week.label}, ${week.start} through ${week.end}. Open Weekly Note.`;
+          this.viewWeekEl.setAttribute('aria-label', label);
+          this.viewWeekEl.title = label;
+        }
+        this.renderListDates(info.view.type, info.start, info.end);
+        this.installDateButtons();
+        void this.plugin.onVisibleRange({ start: info.start.toISOString(), end: info.end.toISOString() });
+      },
+      dateClick: arg => this.handleDateClick(arg),
+      dayHeaderContent: arg => {
+        const formatted = dateAt(arg.date, this.settings.timeZone).locale('en');
+        if (arg.view.type === 'dayGridMonth' || arg.view.type === 'multiMonthYear') return formatted.format('ddd');
+        const day = formatted.format('YYYY-MM-DD');
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'cn-date-open cn-date-open-header';
+        button.setAttribute('aria-label', `Open Daily Note for ${day}`);
+        const weekday = document.createElement('span'); weekday.textContent = formatted.format('ddd');
+        const number = document.createElement('span'); number.textContent = formatted.format('D');
+        button.append(weekday, number);
+        button.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); void this.openDay(day); });
+        return { domNodes: [button] };
+      },
+      eventClick: arg => this.handleEventClick(arg),
+      eventDrop: arg => void this.handleMove(arg),
+      eventResize: arg => void this.handleMove(arg),
+      eventDidMount: arg => {
+        const event = this.plugin.eventById(arg.event.id);
+        if (!event) return;
+        arg.el.setAttribute('aria-label', `${event.title}. Open Event Note.`);
+        const details = document.createElement('button');
+        details.className = 'cn-event-details';
+        details.textContent = '⋯';
+        details.type = 'button';
+        details.setAttribute('aria-label', `Details and edit: ${event.title}`);
+        details.addEventListener('click', e => { e.stopPropagation(); new EventModal(this.app, this.settings, async value => {
+          if (value.title !== event.title) { new Notice('Edit the Event Note title in Obsidian.'); return; }
+          await this.plugin.reschedule(event, value.interval);
+        }, event).open(); });
+        arg.el.appendChild(details);
+        arg.el.addEventListener('contextmenu', e => {
+          e.preventDefault(); e.stopPropagation(); this.newEvent(this.pointerInterval(e.clientX, e.clientY, event));
+        });
+      },
+      dayCellDidMount: () => this.installDateButtons(),
+      weekNumberDidMount: arg => {
+        const week = weekInfo(arg.date, resolveWeekRules(this.app, this.settings), this.settings.timeZone);
+        const label = `${week.label}, ${week.start} through ${week.end}. Open Weekly Note.`;
+        arg.el.setAttribute('role', 'button');
+        arg.el.setAttribute('tabindex', '0');
+        arg.el.setAttribute('aria-label', label);
+        arg.el.setAttribute('title', label);
+        if (week.start === weekInfo(this.today(), resolveWeekRules(this.app, this.settings), this.settings.timeZone).start) arg.el.classList.add('is-current-week');
+        const open = (event: Event) => { event.preventDefault(); event.stopPropagation(); void this.openWeek(week.start); };
+        arg.el.addEventListener('click', open);
+        arg.el.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') open(event); });
+      },
+    });
+    grid.addEventListener('contextmenu', e => {
+      if ((e.target as HTMLElement).closest('.fc-event')) return;
+      e.preventDefault();
+      this.newEvent(this.pointerInterval(e.clientX, e.clientY));
+    });
+    this.dateButtonObserver = new MutationObserver(() => this.installDateButtons());
+    this.dateButtonObserver.observe(grid, { childList: true, subtree: true });
+    this.calendar.render();
+    this.applySidebarLayout();
+    this.updateDisplayControls();
+    this.renderMini();
+  }
+
+  async onClose(): Promise<void> {
+    if (this.sidebarPersistTimer) window.clearTimeout(this.sidebarPersistTimer);
+    if (this.pendingSidebarWidth !== undefined) {
+      await this.saveDisplaySettings({ sidebarWidth: this.pendingSidebarWidth });
+      this.pendingSidebarWidth = undefined;
+    }
+    this.dateButtonObserver?.disconnect();
+    this.miniResizeObserver?.disconnect();
+    this.shellResizeObserver?.disconnect();
+    this.stopSidebarDrag?.();
+    if (this.miniResizeFrame) cancelAnimationFrame(this.miniResizeFrame);
+    if (this.layoutResizeFrame) cancelAnimationFrame(this.layoutResizeFrame);
+    this.calendar?.destroy(); this.calendar = undefined;
+  }
+  get settings(): PluginSettings { return this.plugin.store.state.settings; }
+  private today(): string { return dateAt(new Date(), this.settings.timeZone).format('YYYY-MM-DD'); }
+  private navigateToday(): void {
+    const today = this.today();
+    this.selectedDay = today;
+    this.miniMonth = dateAt(today, this.settings.timeZone).startOf('month').format('YYYY-MM-DD');
+    if (this.miniEl) this.miniEl.scrollTop = 0;
+    this.calendar?.today();
+    this.renderMini();
+  }
+  private firstDay(): number {
+    const rules = resolveWeekRules(this.app, this.settings);
+    if (rules.weekMode === 'iso') return 1;
+    const names = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    return rules.weekStart === 'locale' ? dateAt(new Date(), this.settings.timeZone).locale(rules.locale).localeData().firstDayOfWeek() : names.indexOf(rules.weekStart);
+  }
+  private applySidebarLayout(requested = this.pendingSidebarWidth ?? this.settings.sidebarWidth): void {
+    if (!this.shellEl || !this.sidebarEl || !this.separatorEl) return;
+    const collapsed = this.settings.sidebarCollapsed;
+    const width = sidebarWidthForContainer(requested, this.shellEl.clientWidth);
+    const overlay = !collapsed && width === 0;
+    this.shellEl.toggleClass('is-sidebar-collapsed', collapsed);
+    this.shellEl.toggleClass('is-sidebar-overlay', overlay);
+    this.sidebarEl.style.width = `${overlay ? Math.min(260, Math.max(0, this.shellEl.clientWidth - 16)) : width}px`;
+    this.separatorEl.setAttribute('aria-valuenow', String(width || requested));
+    this.updateDisplayControls();
+    if (this.layoutResizeFrame) cancelAnimationFrame(this.layoutResizeFrame);
+    this.layoutResizeFrame = requestAnimationFrame(() => { this.layoutResizeFrame = undefined; this.calendar?.updateSize(); });
+  }
+  private updateDisplayControls(): void {
+    this.sidebarRestore?.setAttribute('aria-expanded', String(!this.settings.sidebarCollapsed));
+    this.workdaysToggle?.setAttribute('aria-pressed', String(this.settings.workdaysOnly));
+    this.workdaysToggle?.setAttribute('aria-label', this.settings.workdaysOnly ? 'Show all days in the main calendar' : 'Show workdays only in the main calendar');
+    this.workdaysToggle?.toggleClass('is-active', this.settings.workdaysOnly);
+  }
+  private async saveDisplaySettings(change: Partial<Pick<PluginSettings, 'sidebarWidth' | 'sidebarCollapsed' | 'workdaysOnly'>>): Promise<void> {
+    try {
+      await this.plugin.store.commit([], state => { state.settings = { ...state.settings, ...change }; });
+      for (const leaf of this.app.workspace.getLeavesOfType(CALENDAR_VIEW_TYPE)) {
+        if (leaf.view instanceof CalendarNoteView) leaf.view.settingsChanged();
+      }
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : 'Could not save calendar display settings.');
+      this.settingsChanged();
+    }
+  }
+  private async toggleSidebar(): Promise<void> {
+    const collapsed = !this.settings.sidebarCollapsed;
+    await this.saveDisplaySettings({ sidebarCollapsed: collapsed });
+  }
+  private async toggleWorkdays(): Promise<void> {
+    const workdaysOnly = !this.settings.workdaysOnly;
+    await this.saveDisplaySettings({ workdaysOnly });
+  }
+  private startSidebarDrag(event: PointerEvent): void {
+    if (event.button !== 0 || !this.shellEl || !this.sidebarEl) return;
+    if (this.sidebarPersistTimer) window.clearTimeout(this.sidebarPersistTimer);
+    this.sidebarPersistTimer = undefined;
+    this.pendingSidebarWidth = undefined;
+    this.separatorEl?.focus();
+    event.preventDefault();
+    this.stopSidebarDrag?.();
+    const startX = event.clientX;
+    const startWidth = this.sidebarEl.getBoundingClientRect().width;
+    let currentWidth = startWidth;
+    const move = (next: PointerEvent) => {
+      const width = sidebarWidthForContainer(startWidth + next.clientX - startX, this.shellEl!.clientWidth);
+      if (!width) return;
+      currentWidth = width;
+      this.applySidebarLayout(width);
+    };
+    const stop = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointercancel', stop);
+      this.stopSidebarDrag = undefined;
+      if (Math.round(currentWidth) !== this.settings.sidebarWidth) void this.saveDisplaySettings({ sidebarWidth: Math.round(currentWidth) });
+    };
+    this.stopSidebarDrag = stop;
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop);
+    window.addEventListener('pointercancel', stop);
+  }
+  private button(parent: HTMLElement, label: string, click: () => void, aria = label): HTMLButtonElement {
+    const button = parent.createEl('button', { text: label });
+    button.setAttribute('aria-label', aria);
+    button.addEventListener('click', click);
+    return button;
+  }
+  private weekButton(parent: HTMLElement, day: string, label: string): void {
+    const week = weekInfo(day, resolveWeekRules(this.app, this.settings), this.settings.timeZone);
+    const button = this.button(parent, label, () => void this.openWeek(week.start),
+      `${week.label}, ${week.start} through ${week.end}. Open Weekly Note.`);
+    button.title = button.getAttribute('aria-label') ?? '';
+    if (week.start === weekInfo(this.today(), resolveWeekRules(this.app, this.settings), this.settings.timeZone).start) button.addClass('is-current-week');
+  }
+  private async openWeek(day: string): Promise<void> { await this.plugin.runAction(() => this.plugin.notes.openWeekly(day)); }
+  private async openDay(day: string): Promise<void> { this.selectedDay = day; this.renderMini(); await this.plugin.runAction(() => this.plugin.notes.openDaily(day)); }
+  private renderMini(): void {
+    if (!this.miniEl || !this.miniMonth) return;
+    const first = dateAt(this.miniMonth, this.settings.timeZone).locale('en');
+    this.miniNavTitle?.setText(first.format('MMM YYYY'));
+    const previousScroll = this.miniEl.scrollTop;
+    this.miniEl.empty();
+    const firstCard = this.renderMiniMonth(first, false);
+    const nextCard = this.renderMiniMonth(first.clone().add(1, 'month'));
+    const cardHeight = nextCard.getBoundingClientRect().height;
+    const firstHeight = firstCard.getBoundingClientRect().height;
+    const fit = visibleMonthCount(this.miniEl.clientHeight + Math.max(0, cardHeight - firstHeight), cardHeight);
+    const rendered = Math.min(6, fit + 2);
+    for (let month = 2; month < rendered; month++) this.renderMiniMonth(first.clone().add(month, 'month'));
+    this.miniEl.scrollTop = previousScroll;
+  }
+  private renderMiniMonth(monthDate: moment.Moment, showHeading = true): HTMLElement {
+    const card = this.miniEl!.createDiv({ cls: 'cn-mini-month' });
+    if (showHeading) card.createEl('h3', { text: monthDate.format('MMMM YYYY') });
+    const table = card.createEl('table');
+    const head = table.createEl('thead').createEl('tr');
+    head.createEl('th', { text: 'Wk' });
+    const firstDay = this.firstDay();
+    for (let d = 0; d < 7; d++) {
+      const weekday = dateAt('2026-10-18', this.settings.timeZone).add((firstDay + d) % 7, 'days').locale('en');
+      const th = head.createEl('th', { text: weekday.format('ddd') }); th.title = weekday.format('dddd');
+    }
+    const start = monthDate.clone().subtract((monthDate.day() - firstDay + 7) % 7, 'days');
+    for (let row = 0; row < 6; row++) {
+      const tr = table.createEl('tr');
+      const weekDay = start.clone().add(row * 7, 'days').format('YYYY-MM-DD');
+      const weekCell = tr.createEl('td');
+      this.weekButton(weekCell, weekDay, String(weekInfo(weekDay, resolveWeekRules(this.app, this.settings), this.settings.timeZone).number));
+      for (let col = 0; col < 7; col++) {
+        const day = start.clone().add(row * 7 + col, 'days').format('YYYY-MM-DD');
+        const td = tr.createEl('td');
+        if (day.slice(0, 7) !== monthDate.format('YYYY-MM')) td.addClass('is-outside');
+        const button = this.button(td, String(Number(day.slice(-2))), () => { this.selectedDay = day; this.calendar?.gotoDate(day); this.renderMini(); }, `Navigate to ${day}`);
+        if (day === this.today()) button.addClass('is-today');
+        if (day === this.selectedDay) button.addClass('is-selected');
+      }
+    }
+    return card;
+  }
+  private renderListDates(type: string, start: Date, end: Date): void {
+    if (!this.listDatesEl) return;
+    this.listDatesEl.empty();
+    if (type !== 'listWeek') { this.listDatesEl.style.display = 'none'; return; }
+    this.listDatesEl.style.display = '';
+    const row = this.listDatesEl.createDiv({ cls: 'cn-list-date-buttons' });
+    const weekStart = dateAt(start, this.settings.timeZone).format('YYYY-MM-DD');
+    this.weekButton(row, weekStart, `Week ${weekInfo(weekStart, resolveWeekRules(this.app, this.settings), this.settings.timeZone).number}`);
+    let date = dateAt(start, this.settings.timeZone).locale('en');
+    const last = dateAt(end, this.settings.timeZone);
+    while (date.isBefore(last)) {
+      const day = date.format('YYYY-MM-DD');
+      if (!this.settings.workdaysOnly || (date.day() !== 0 && date.day() !== 6)) {
+        this.button(row, date.format('ddd D'), () => void this.openDay(day), `Open Daily Note for ${day}`);
+      }
+      date.add(1, 'day');
+    }
+  }
+  private installDateButtons(): void {
+    const grid = this.containerEl.querySelector('.cn-calendar');
+    if (!grid) return;
+    const view = this.calendar?.view.type ?? this.viewType;
+    const daygrid = view === 'dayGridMonth' || view === 'multiMonthYear';
+    const selector = '.fc-list-day[data-date]';
+    grid.querySelectorAll<HTMLElement>(selector).forEach(cell => {
+      const date = cell.getAttribute('data-date');
+      if (!date) return;
+      const target = cell.querySelector('.fc-list-day-cushion') ?? cell;
+      let button = target.querySelector<HTMLButtonElement>(':scope > .cn-date-open');
+      if (!button) {
+        button = document.createElement('button');
+        button.className = 'cn-date-open'; button.type = 'button';
+        button.textContent = dateAt(date, this.settings.timeZone).locale('en').format('ddd, MMM D');
+        button.setAttribute('aria-label', `Open Daily Note for ${date}`);
+        button.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); void this.openDay(date); });
+      }
+      if (target.childNodes.length !== 1 || target.firstChild !== button) target.replaceChildren(button);
+    });
+    if (daygrid) grid.querySelectorAll<HTMLElement>('.fc-daygrid-day[data-date]').forEach(cell => {
+      const date = cell.dataset.date;
+      const number = cell.querySelector<HTMLElement>('.fc-daygrid-day-number');
+      if (!date || !number || number.dataset.cnReady) return;
+      number.dataset.cnReady = '1';
+      number.setAttribute('role', 'button');
+      number.setAttribute('tabindex', '0');
+      number.setAttribute('aria-label', `Open Daily Note for ${date}`);
+      const open = (event: Event) => { event.preventDefault(); event.stopPropagation(); void this.openDay(date); };
+      number.addEventListener('click', open);
+      number.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') open(event); });
+    });
+  }
+  private eventInputs(): EventInput[] {
+    return this.plugin.events.filter(event => event.status !== 'cancelled' && event.status !== 'removed').map(event => ({
+      id: event.id, title: event.title, start: event.start, end: event.end, allDay: event.allDay,
+      backgroundColor: this.settings.sources.find(source => source.id === event.sourceId)?.color ?? undefined,
+    }));
+  }
+  refresh(): void {
+    if (!this.calendar) return;
+    this.historyEl?.setText(this.plugin.reviewCount ? `History (${this.plugin.reviewCount})` : 'History');
+    this.calendar.refetchEvents();
+    this.renderMini();
+  }
+  settingsChanged(): void {
+    if (!this.calendar) return;
+    this.calendar.setOption('timeZone', this.settings.timeZone);
+    this.calendar.setOption('locale', 'en');
+    const rules = resolveWeekRules(this.app, this.settings);
+    this.calendar.setOption('weekNumberCalculation', date => weekInfo(date, rules, this.settings.timeZone).number);
+    this.calendar.setOption('firstDay', this.firstDay());
+    this.calendar.setOption('weekends', !this.settings.workdaysOnly);
+    this.calendar.setOption('slotDuration', { minutes: this.settings.snapMinutes });
+    this.calendar.setOption('snapDuration', { minutes: this.settings.snapMinutes });
+    this.calendar.setOption('views', {
+      timeGridWeek: { weekNumbers: false }, timeGridDay: { weekNumbers: false },
+      customDays: { type: 'timeGrid', duration: { days: this.settings.customDays }, weekNumbers: false },
+      listWeek: {},
+    });
+    this.applySidebarLayout();
+    this.updateDisplayControls();
+    this.refresh();
+  }
+  private handleDateClick(arg: DateClickArg): void {
+    const type = arg.view.type;
+    if (type === 'dayGridMonth' || type === 'multiMonthYear' || type === 'listWeek') {
+      void this.openDay(arg.dateStr.slice(0, 10)); return;
+    }
+    const day = arg.dateStr.slice(0, 10);
+    this.newEvent({ start: arg.allDay ? day : arg.date.toISOString(),
+      end: arg.allDay ? dateAt(day, this.settings.timeZone).add(1, 'day').format('YYYY-MM-DD')
+        : dateAt(arg.date, this.settings.timeZone).add(this.settings.defaultDurationMinutes, 'minutes').toISOString(), allDay: arg.allDay });
+  }
+  private handleEventClick(arg: EventClickArg): void {
+    arg.jsEvent.preventDefault();
+    if (Date.now() - this.lastDragAt < 600) return;
+    const event = this.plugin.eventById(arg.event.id);
+    if (event) void this.plugin.runAction(() => this.plugin.notes.openEvent(event));
+  }
+  private async handleMove(arg: EventDropArg | EventResizeDoneArg): Promise<void> {
+    this.lastDragAt = Date.now();
+    const event = this.plugin.eventById(arg.event.id);
+    if (!event || !arg.event.start) { arg.revert(); return; }
+    const dayStart = (date: Date) => moment.tz(isoDay(date, this.settings.timeZone), 'YYYY-MM-DD', true, this.settings.timeZone).format('YYYY-MM-DDTHH:mm:ssZ');
+    const interval: Interval = { start: arg.event.allDay ? dayStart(arg.event.start) : arg.event.start.toISOString(),
+      end: arg.event.end ? arg.event.allDay ? dayStart(arg.event.end) : arg.event.end.toISOString()
+        : arg.event.allDay ? dateAt(dayStart(arg.event.start), this.settings.timeZone).add(1, 'day').format('YYYY-MM-DDTHH:mm:ssZ')
+          : dateAt(arg.event.start, this.settings.timeZone).add(this.settings.defaultDurationMinutes, 'minutes').toISOString(), allDay: arg.event.allDay };
+    try { await this.plugin.reschedule(event, interval); }
+    catch (error) { arg.revert(); new Notice(error instanceof Error ? error.message : 'Could not reschedule event.'); }
+  }
+  private pointerInterval(x: number, y: number, fallback?: CalendarEvent): Interval {
+    const grid = this.containerEl.querySelector('.cn-calendar');
+    const columns = [...(grid?.querySelectorAll<HTMLElement>('.fc-timegrid-col[data-date]') ?? [])];
+    const column = columns.find(el => { const r = el.getBoundingClientRect(); return x >= r.left && x < r.right; });
+    const day = column?.dataset.date ?? (fallback ? dateAt(fallback.start, this.settings.timeZone).format('YYYY-MM-DD') : this.selectedDay ?? this.today());
+    const slots = [...(grid?.querySelectorAll<HTMLElement>('.fc-timegrid-slot[data-time]') ?? [])];
+    const slot = slots.find(el => { const r = el.getBoundingClientRect(); return y >= r.top && y < r.bottom; });
+    const time = slot?.dataset.time?.slice(0, 5) ?? (fallback ? dateAt(fallback.start, this.settings.timeZone).format('HH:mm') : '09:00');
+    const start = moment.tz(`${day}T${time}:00`, 'YYYY-MM-DDTHH:mm:ss', true, this.settings.timeZone).toISOString();
+    return { start, end: dateAt(start, this.settings.timeZone).add(this.settings.defaultDurationMinutes, 'minutes').toISOString(), allDay: false };
+  }
+  newEvent(initial?: Interval): void {
+    const day = this.selectedDay ?? this.today();
+    const start = initial?.start ?? moment.tz(`${day}T09:00:00`, 'YYYY-MM-DDTHH:mm:ss', true, this.settings.timeZone).toISOString();
+    const interval = initial ?? { start, end: dateAt(start, this.settings.timeZone).add(this.settings.defaultDurationMinutes, 'minutes').toISOString() };
+    new EventModal(this.app, this.settings, async value => { await this.plugin.createLocal(value.title, value.interval); }, undefined, interval).open();
+  }
+}

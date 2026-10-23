@@ -1,111 +1,86 @@
-# Local development and Obsidian loading
+# Calendar-Note development and QA
 
-## What can run today
+Calendar-Note now has a local Obsidian plugin implementation. The HTML pages under `docs/changes/calendar-note/preview/` remain a separate browser prototype: they use browser storage and fictional sample feeds, and do not inspect or modify a Vault.
 
-This repository contains a product proposal and an interactive browser prototype. It does not yet contain an Obsidian plugin entry point, `manifest.json`, compiled `main.js`, package manifest, or plugin build command. **Calendar-Note cannot currently be enabled as a local Obsidian plugin.** Copying the HTML preview or its `app.js` into a Vault does not create a plugin.
+## Build and package
 
-The current work covers calendar interactions, Event Notes, Daily Notes, editable Weekly Notes, and settings in browser storage. There are no Vault writes or live iCal requests. The [draft proposal](../changes/calendar-note/proposal.html) remains under `docs/changes/`.
-
-## Run the design prototype
-
-From the checkout containing the latest design changes:
+Requirements: Node.js 22 or newer, npm, and `zip` for packaging.
 
 ```sh
-python3 -m http.server 4318 --bind 127.0.0.1
+npm ci
+npm run typecheck
+npm test
+npm run build
+npm run package
 ```
 
-Open [the calendar](http://127.0.0.1:4318/docs/changes/calendar-note/preview/index.html) and [settings](http://127.0.0.1:4318/docs/changes/calendar-note/preview/settings.html). Stop the server with Control-C. If port 4318 is occupied, use another port in both the command and URLs. No Node package installation or build is needed for the HTML.
+`npm run build` writes the plugin bundle to the repository root as `main.js`. `npm run package` rebuilds it and creates `dist/calendar-note.zip`, containing the `calendar-note/` directory with `main.js`, `manifest.json`, `styles.css`, `LICENSE`, and generated `THIRD_PARTY_LICENSES.txt`.
 
-Use This week to open the current Weekly Note, or click a week number to open another week. Edit its Markdown, switch away, and reopen it to check autosave. Reload and open the same week to verify persistence. Download Markdown when you want a file outside the browser. Browser storage does not synchronize with Obsidian, and different origins may have separate stored notes.
-
-## Preview an iCal source change
-
-The prototype uses fictional sample subscriptions and does not make network requests. Choose **Load subscription examples** in the Settings preview, then use **Simulate iCal change** in the calendar. Select an imported event and enter its incoming start/end range. Applying the fixture updates the simulated source cache and, when the event is linked, its Event Note frontmatter and tracked Daily Note bullet. The Event Note keeps its path and body. The Change history view records source and effective ranges and the resulting note paths. An unlinked imported event shows **No Event Note yet** and **None** for Daily Note paths; the change does not create note artifacts.
-
-Use **All** or **Needs review** to filter history. **Open note** follows the recorded Event Note path. **Mark reviewed** acknowledges the row and keeps it in All. Outcomes are labeled **Applied automatically**, **Kept local time**, or **Needs attention**. A local override remains the effective calendar time when a simulated upstream change arrives; choose **Use latest source times** to clear only that time override and apply the latest source interval to the note and Daily Note entry. The action is recorded as a resolution. A **Retry** action appears only while the accepted source still matches the failed revision's baseline. If a newer accepted source supersedes a failed row, Retry disappears; Mark reviewed removes it from Needs review and the count, while the row stays in All.
-
-Browser-verified examples include a source change moving an event from October 23 to October 24 while preserving its Event Note path/body, moving the tracked Daily Note link, and retaining the Journal; resolving a local override using the latest source interval; and a path-collision failure that left the accepted calendar event, Event Note properties/body, and Daily Note unchanged before Retry succeeded on that same history row after fixing the path setting. Desktop 1440 px and mobile 390 px layouts were inspected without horizontal overflow. Broader failure/restart recovery and actual Obsidian Vault atomicity remain unverified.
-
-These controls exercise a local browser-storage transaction with fixture data. They do not parse remote ICS, poll on a schedule, synchronize with an Obsidian Vault, or prove the real plugin's recovery behavior.
-
-## Match an existing Calendar Weekly Note
-
-The browser cannot discover installed Obsidian plugins. Enter matching values manually in the prototype settings:
-
-| Calendar setting | Calendar-Note prototype setting |
-| --- | --- |
-| Weekly note format | Weekly note format; for example `gggg-[W]ww` |
-| Weekly note folder | Weekly note folder; literal Vault-relative text, blank for the root |
-| Override locale | Date locale, such as English (US), English (UK), or Traditional Chinese |
-| Start week on | Start week on in Calendar locale mode |
-
-In Calendar, enable Show week number to reveal its weekly settings. If Periodic Notes weekly notes are enabled, Calendar uses that provider's weekly format, folder, and template instead. The planned Calendar-Note plugin will follow that precedence, with its own fallback when neither provider is available. Provider detection and templates are not implemented in the browser.
-
-Keep Moment token case: `gggg`/`ww` follow locale week rules; `GGGG`/`WW` use ISO weeks. A calendar-year `YYYY` can differ from a week-year near New Year. Calendar's first-day override preserves the locale's first-week rule. The prototype supports locale-default, Sunday, and Monday starts; ISO mode fixes Monday and the January-4 rule. Matching folder and format alone is insufficient if the effective week rules differ.
-
-The weekly format is evaluated at the selected week's start. Format `gggg/[Week] ww` and folder `Journal/Weekly` produce a path such as `Journal/Weekly/2026/Week 43.md`. A folder named `Archive/YYYY` stays literal; use the format field for date-based subfolders. Changing settings does not move existing notes. Weekly, Daily, and Event Note paths must be distinct; a conflict is reported without overwriting another note.
-
-Compatibility was reviewed against [Calendar settings](https://github.com/liamcain/obsidian-calendar-plugin/blob/ef3f2696da11aa1d11a272179caea062d6144640/src/settings.ts), [Calendar weekly opening](https://github.com/liamcain/obsidian-calendar-plugin/blob/ef3f2696da11aa1d11a272179caea062d6144640/src/view.ts), [locale configuration](https://github.com/liamcain/obsidian-calendar-ui/blob/c275987d032377bb141747da0f9db2c5cde2df03/src/localization.ts), and [weekly settings resolution](https://github.com/liamcain/obsidian-daily-notes-interface/blob/6fcb61850cbb39010b7d1d667fdb90f2a6a4626c/src/settings.ts).
-
-## Load a future plugin build locally
-
-These steps apply **after a real Calendar-Note plugin build exists**. Its build command and output directory must be documented when implementation begins; this snapshot has neither.
-
-1. Create a dedicated test Vault. Obtain built `manifest.json`, `main.js`, and, when provided, `styles.css`.
-2. Place those files directly in `<test-vault>/.obsidian/plugins/<manifest-id>/`. The directory must match `id` in `manifest.json`.
-3. Open the test Vault in Obsidian. Under Settings → Community plugins, turn on community plugins and enable Calendar-Note. Restart Obsidian if the manifest changed.
-4. After updating a build, disable and re-enable the plugin, or reload Obsidian.
-
-Example destination, assuming the future manifest ID is `calendar-note`:
-
-```text
-Test Vault/
-  .obsidian/
-    plugins/
-      calendar-note/
-        manifest.json
-        main.js
-        styles.css
-```
-
-For a completed build, this manual copy example uses placeholder paths:
+For a dedicated test Vault, build first and use an explicit absolute path:
 
 ```sh
-task_build=/absolute/path/to/calendar-note-build
-task_vault=/absolute/path/to/test-vault
-task_plugin_dir="$task_vault/.obsidian/plugins/calendar-note"
-mkdir -p "$task_plugin_dir"
-cp "$task_build/manifest.json" "$task_build/main.js" "$task_plugin_dir/"
-if [ -f "$task_build/styles.css" ]; then
-  cp "$task_build/styles.css" "$task_plugin_dir/"
-fi
+npm run install:test-vault -- /absolute/path/to/calendar-note-test-vault
 ```
 
-If the Vault uses a custom configuration directory, replace `.obsidian` accordingly. For the underlying loading and reload workflow, see [Obsidian's official plugin development guide](https://docs.obsidian.md/Plugins/Getting%20started/Build%20a%20plugin).
+The installer requires an existing directory with `test` in its name and writes to that Vault's `.obsidian/plugins/calendar-note/`. It will not install to the repository or a directory without `test` in its name. To install manually, extract the archive's `calendar-note/` folder into `<TEST_VAULT>/.obsidian/plugins/`. In Obsidian enable community plugins and Calendar-Note under **Settings → Community plugins**, then reload if prompted.
 
-## Checks before local integration
+Uninstall by disabling Calendar-Note and removing its plugin folder. `data.json` inside that folder stores plugin settings, source/cache/history, and note-link tracking; `recovery.json` stores any interrupted multi-file transaction. Removing the folder removes both files. Event, Daily, and Weekly Markdown files and their existing links remain in the Vault. Copy `data.json` first if you may want to preserve settings, history, or tracking state. Resolve pending recovery before uninstalling; if it cannot be resolved, keep a copy of `recovery.json` until recovery is handled. The plugin has no automatic Vault-note cleanup command.
 
-Run from the repository root:
+## Plugin behavior and boundaries
 
-```sh
-node --check docs/changes/calendar-note/preview/app.js
-node --check docs/changes/calendar-note/preview/path-format.js
-node --check docs/changes/calendar-note/preview/event-core.js
-node --check docs/changes/calendar-note/preview/weekly-core.js
-node docs/changes/calendar-note/preview/smoke-test.cjs
-node docs/changes/calendar-note/preview/event-core.test.cjs
-node docs/changes/calendar-note/preview/daily-note.test.cjs
-node docs/changes/calendar-note/preview/weekly-note.test.cjs
-```
+The plugin registers a Calendar-Note view with Week, Day, Month, Year, Custom days, and List views. Its toolbar toggles the main calendar between All days (the default) and Workdays (Monday through Friday); the mini-calendar always retains seven days, and the setting does not change note week rules. The sidebar has a Today control beside month navigation and a keyboard-accessible resize separator. Close the expanded sidebar with its ×; a compact, keyboard-focusable icon handle at the left edge restores it when collapsed without consuming a toolbar row. Native checks confirmed the handle is accessible and restores the saved width. Sidebar width and collapsed state are stored in plugin settings. Commands are `open-calendar`, `new-event`, `refresh`, `change-history`, and `retry-recovery` under the `Calendar-Note:` display prefix. Local event files use `event_id`, `start`, and `end` frontmatter; imported notes also track source identity and recurrence ID. Event Note body content and unrelated frontmatter are retained when managed fields change. Event Notes link to a managed bullet under the Daily Note's `## Event` section. A bullet changed by the user or moved such that it cannot be identified safely triggers attention/relink behavior rather than broad text replacement. The event-title input uses a vertically labeled, full-width row.
 
-These checks exercise the prototype, not Obsidian integration. Once a plugin exists, separately verify opening an existing Calendar Weekly Note, missing-note creation with the provider's template, no duplicate file after reopening, cross-year locale/ISO naming, preserved user text, disabled-provider fallback, and write failures in the test Vault.
+Date patterns use Moment formatting and the configured IANA display zone (default `Asia/Taipei`). Daily Notes follow enabled core Daily Notes settings, then Calendar-Note fallback settings. Weekly Notes prefer enabled Periodic Notes weekly configuration, then Calendar plugin weekly configuration, then Calendar-Note fallback settings. Detection uses internal Obsidian provider state because there is no public provider API; provider upgrades may change those internals. Templates are Vault-relative Markdown paths with `{{date}}` and optional `{{date:FORMAT}}` replacement. Event Note patterns additionally accept `{title}`, `{calendar}`, and `{uid}`.
 
-For iCal integration in a future plugin build, use a controlled test feed or parsed fixtures and verify that matching a single event by source+UID or a recurring event by source+UID+original RECURRENCE-ID updates the same imported event, its managed Event Note times, and its Daily Note bullet without changing note body or unrelated journal content. Confirm identical polls add no history row, A→B→A adds two, local overrides stay effective until explicitly resolved, and **Use latest source times** records the resolution. Also exercise unlinked events, rewritten past bullets, path collisions, failed multi-file writes, retry/restart recovery, changed UIDs, ambiguous recurrence mappings, cancellations, invalid feeds, and events outside the visible range. Those checks require a real plugin and test Vault; they cannot be completed with this HTML preview.
+Subscriptions accept HTTPS and `webcal://` feeds. The plugin converts `webcal://` to HTTPS, uses conditional requests when available, parses feeds with `ical.js`, caches the response privately, and does not write to the upstream calendar. Recurrence instances are identified by source, UID, and original RECURRENCE-ID. Imported event rescheduling is local-only. Source changes can update managed Event Note times and the tracked Daily Note bullet, while preserving note body and unrelated journal content. History tracks accepted changes and supports review, eligible retry, and explicit resolution of local overrides. A durable recovery journal preserves prior committed state and pauses edits when interrupted writes require recovery. There is no automatic deletion of notes when events are cancelled or removed from feeds.
 
-## Troubleshooting
+## Automated checks and controlled feed testing
 
-- **Calendar-Note is missing from Installed plugins:** this snapshot has no plugin build. For a future build, check for `manifest.json` and `main.js` immediately inside the directory matching the manifest ID.
-- **An old UI still appears:** confirm the static server is serving the latest worktree, then reload the browser. After replacing real plugin build files, reload the plugin in Obsidian.
-- **The wrong Weekly Note opens:** compare folder, format, effective locale, and first weekday with the provider Calendar is using. Check token case near New Year.
-- **Edits are missing in Obsidian:** browser edits are stored in the browser only. A Markdown download must be placed in the Vault manually until real integration exists.
-- **A note-path conflict appears:** give Weekly, Daily, and Event Notes separate paths; existing content is preserved.
+Run `npm run typecheck` and `npm test` before packaging. Tests cover date/week rules, provider setting resolution, note/path handling, ICS parsing, subscription refresh behavior, source reconciliation/history, and storage recovery. They run against test adapters and fixtures; they do not prove behavior in an installed Obsidian app.
+
+For controlled subscription testing, use a private local HTTPS fixture server or an HTTPS test endpoint that you control. Add its URL as a source in the test Vault, and use deterministic ICS fixture revisions for baseline, changed time, unchanged revision metadata, cancellation, recurrence override, invalid feed, and recovery cases. Avoid putting real calendar URLs or payloads in repository fixtures. Confirm manual Refresh and scheduled refresh, conditional fetch/cache retention, recurrence expansion, all-day exclusive end dates, time zones/DST, and independent behavior when one source fails. For source-change tests, compare the event view, managed Event Note fields, the exact tracked Daily Note bullet, unrelated journal content, and History before and after. Test local override resolution, Retry eligibility, source supersession, changed or ambiguous recurrence identity, and interrupted write recovery.
+
+## Native Obsidian test-Vault checklist
+
+Native QA was completed for the scenarios below in an isolated Vault with Obsidian 1.14.5. The build was copied into the Vault as `main.js`, `manifest.json`, and `styles.css`; the plugin loaded, registered its commands, and opened the Calendar-Note view. This does not establish every acceptance criterion.
+
+Verified in Obsidian 1.14.5:
+
+- Creating a local event created its Event Note and Daily Note bullet immediately. With core Daily Notes enabled and its folder setting blank, the Daily Note was created at the Vault root as `YYYY-MM-DD.md`.
+- Rescheduling a local event across days preserved custom YAML properties and note body, retained the past-date journal, and moved only the tracked event link to the new date's Daily Note.
+- Clicking an empty main-calendar date header opened that date's native Daily Note without creating an Event Note.
+- A controlled subscription test passed an ICS feed into the actual parser and source-sync path. Changing an event from the 23rd to the 24th retained its Event Note path and body and moved its Daily Note link.
+- Injecting a Daily Note write failure during a change from the 24th to the 25th rolled back the note/cache update and persisted a pending review row.
+- After plugin reload, the pending 24th-to-25th change remained available. Retrying reused the same history ID, applied the new time and moved the Daily Note link; marking the row reviewed persisted.
+- Native editor QA opened `Weekly Notes/2026-W43.md`, and typed content autosaved. With no user template, the note contained `## Weekly review` and no generated H1. A final reload preserved the edited Weekly Note text and reviewed state.
+- A live `requestUrl` request to the public `https://raw.githubusercontent.com/kewisch/ical.js/master/samples/minimal.ics` fixture parsed one event and its `VTIMEZONE`. The event was unlinked, so the Vault file count remained unchanged; the source was disabled after the check.
+- Imported Event Note renames through Obsidian's file manager passed both with automatic internal-link updates enabled and with the “Do not update” prompt choice. Each left one valid managed Daily Note bullet, removed the old bullet, cleared pending rename state, retained the stable event ID and new path, and preserved Event Note body and unrelated journal text. Saved state agreed, and no recovery journal remained. A second reload preserved links, `reviewedAt`, source-times resolution history, and native-edited Weekly Note text.
+- Native UI inspection confirmed the Month/Year date control is a single clickable date with no overlap, Week labels are single-line English abbreviations with no redundant week row, and the full-width event-title field is focused and defaults to today.
+
+Source-resolution QA confirmed that a local override remains effective when the source baseline changes; **Use latest source times** clears the override, applies the accepted interval, moves the managed Daily Note bullet, preserves Event Note body, and records a separate resolution-history row. An identical source snapshot caused no revision increment, history row, or linked-note write. Editing Event Note frontmatter directly retained event identity, established a local override, and a rescan moved the managed Daily Note bullet while preserving custom YAML and body. A controlled Daily Note write failure rolled back note/cache changes and persisted a review row; after reload, retry reused the same history ID and applied the new time, and marking it reviewed persisted. A controlled 23rd-to-24th source change retained the Event Note path/body and moved its Daily Note bullet.
+
+The automated suite has 69 passing tests at this documentation update, including regressions for Obsidian file-manager rename ordering and equivalent instants with different offsets. The legacy browser-preview suite passes all five test files with the preview-local CommonJS package scope. Automated checks and library-level callback tests do not establish native drag behavior or narrow-window layout.
+
+Native UI checks confirmed the sidebar and main calendar fill available height and bottom-align with mini-calendar content; centered English date labels remain single-line without duplicates through All days → Workdays → All days and Week → Month → Week; pointer and keyboard resizing work; and sidebar width, collapsed state, Workdays setting, and Week view persisted through reload. The mini-calendar kept all seven days. The final × close control and compact, keyboard-focusable left-edge restore handle passed native interaction checks; restoring returned the sidebar at its saved 264 px width without a toolbar control. Month/Year controls, event-title focus/default, rename behavior, Weekly Note text, and review/resolution state also passed native checks.
+
+Remaining native verification: activate the highlighted week-number entry point; verify narrow-window overlay behavior and deeper Year/List layouts; exercise imported event provider precedence and equivalent instants with different timezone offsets in the native app; and drag/move events and both resize edges. Offset equivalence has automated regression coverage but no separate native retest.
+
+The source and automated checks do not count as native-app QA. Continue with the remaining scenarios in a disposable test Vault:
+
+- Install from the ZIP and from the explicit test installer; enable, reload, disable, and re-enable the plugin.
+- Open the view and all six views; navigate weeks/dates; use mouse and keyboard entry points; create, overlap, move, resize, and edit events. Confirm the title field is focused, defaults to today, and uses a vertically labeled full-width row.
+- With no subscriptions, create local Event Notes, open Daily and Weekly Notes, edit them in Obsidian, reopen/reload, and verify existing Markdown, frontmatter, paths, and managed bullets remain intact. Verify the compact left-edge restore handle, then verify narrow-window overlay behavior and deeper Year/List layouts. Confirm only the main calendar hides weekends and the mini-calendar/week rules remain unchanged.
+- Click the highlighted current-week gutter number and other week numbers to open Weekly Notes. Check core Daily Notes, Calendar, and Periodic Notes provider precedence, fallback behavior, templates, locale, Sunday/Monday starts, calendar versus ISO week identity, and dates around New Year.
+- With controlled HTTPS fixtures, test normal refresh, failure/cache retention, recurrence and exceptions, time zones/DST, cancellation/removal, local overrides, history filters/review/retry, and use-latest resolution.
+- Cause safe path conflicts, rewrite or move a managed journal bullet, and simulate restart/interrupted recovery in a disposable Vault. Confirm user text is preserved, unsafe changes require attention, and successful recovery does not duplicate history or links.
+- Inspect plugin unload/reload and app restart for timers, stale views, and pending recovery behavior.
+
+Record additional Obsidian version, OS, test Vault description, fixture IDs (never private URLs), and pass/fail notes here as QA continues. Native behavior outside the verified scenarios above remains unverified.
+
+Known display behavior and constraints: Calendar-Note uses English abbreviated labels for calendar chrome regardless of note locale, with main date headers kept on one line (for example, `Sun 18`). The sidebar mini-calendar can show adjacent months when the available height permits. Moment locale and week rules still control date formatting and week identity. Obsidian's property display follows the user's editor preference; the plugin cannot set that preference per note through a public API.
+
+New-note heading behavior: the no-template Daily Note fallback begins with `## Journal`, and the Weekly Note fallback begins with `## Weekly review`, without generated H1 headings. A new Event Note omits a title heading only when its actual basename matches the original event title; a sanitized or custom filename keeps a title heading. Existing notes and user-provided templates are preserved, and the plugin does not migrate headings automatically.
+
+## Browser prototype
+
+The preview directory has its own CommonJS package scope so its legacy UMD scripts and tests remain CommonJS while the plugin project uses ESM. Run `node --test docs/changes/calendar-note/preview/*.test.cjs docs/changes/calendar-note/preview/smoke-test.cjs` to run the five legacy preview test files. To view the older browser-only prototype, run `python3 -m http.server 4318` from the repository root and open `http://127.0.0.1:4318/docs/changes/calendar-note/preview/index.html`. Its controls demonstrate interaction design using local browser storage and sample data. They do not exercise Vault writes or network subscriptions.
