@@ -1,6 +1,6 @@
 # Calendar-Note
 
-Calendar-Note is a proposed Obsidian calendar plugin built around Event Notes. Clicking an event opens its note and adds a link under the `Event` section of the Daily Note for that event's date. ISO week numbers support weekly planning, and clicking a calendar date opens its Daily Note. iCal subscriptions are optional: local events can be created and rescheduled without a subscription.
+Calendar-Note is a proposed Obsidian calendar plugin built around Event Notes. Clicking an event opens its note and adds a link under the `Event` section of the Daily Note for that event's date. A prominent current-week button and clickable week numbers open editable Weekly Notes; clicking a calendar date opens its Daily Note. iCal subscriptions are optional: local events can be created and rescheduled without a subscription.
 
 The repository currently contains a product proposal and an interactive HTML prototype. The Obsidian plugin, live iCal fetching, and Vault writes have not been implemented.
 
@@ -9,8 +9,9 @@ The repository currently contains a product proposal and an interactive HTML pro
 Proposal documents and their assets live in `docs/changes/calendar-note/`:
 
 - [Product proposal](docs/changes/calendar-note/proposal.html): user stories, event and journal linking, frontmatter, subscription boundaries, architecture, and acceptance criteria.
-- [Calendar preview](docs/changes/calendar-note/preview/index.html): week, month, day, and list views; ISO week numbers; direct date-to-Daily-Note opening; local event creation; Event Note and Daily Note previews.
-- [Settings preview](docs/changes/calendar-note/preview/settings.html): optional subscriptions, Event Note and Daily Note path formats, and live path previews.
+- [Calendar preview](docs/changes/calendar-note/preview/index.html): week, month, day, and list views; readable week numbers and editable Weekly Notes; direct date-to-Daily-Note opening; local event creation; Event Note and Daily Note previews.
+- [Settings preview](docs/changes/calendar-note/preview/settings.html): optional subscriptions, Event/Daily/Weekly Note paths, week rules, and live path previews.
+- [Local development manual](docs/manuals/DEVELOPMENT.md): running the prototype, matching Calendar weekly settings, and loading a future plugin build into a local test Vault.
 
 GitHub displays the HTML source. To use the interactive previews, download the repository and open the HTML files in a browser, or run this static server from the repository root:
 
@@ -28,7 +29,7 @@ No dependency installation or build is required. Moment is bundled locally; the 
 
 ## Try the prototype
 
-1. **Read the week number.** Week, day, and list views show the ISO week-year, such as `2026-W43`. Month and sidebar calendars show a label for each week row. Weeks start on Monday; January 1, 2027 belongs to `2026-W53`, and January 4 begins `2027-W01`.
+1. **Open a Weekly Note.** This week shows the current Taipei week number and opens its editable Markdown. Click another week number in the sidebar or month gutter, or use the week-grid header or list week button to write about that week. Autosave preserves edits across reopening and reload. The current-week highlight is independent of the browsed week. English (US) Calendar locale weeks with Sunday starts are the default; ISO and other supported locale/week-start choices are available in settings.
 2. **Open a date's Daily Note.** Click a main week/day date heading, month date number, or list date heading. The preview opens or creates that date's Daily Note, even when it has no events. It keeps the view and selects the clicked date; choose **Day** to inspect its schedule. Sidebar mini-calendar dates remain navigation. Reopening preserves note content and creates no event or event link.
 3. **Start without iCal.** Local events work independently. No subscription URL is required. Sample events are dated October 19–25, 2026.
 4. **Create an event.** Click an empty time slot in week or day view, or choose **New event**, then enter a title and start/end times. Canceling leaves no event behind.
@@ -84,9 +85,17 @@ The generated journal entry for an event looks like this:
 
 The planned plugin will reuse the core Daily Notes folder, custom format, and template. When that core plugin is disabled, Calendar-Note will use its own settings. The HTML prototype demonstrates these settings independently and does not read a real Obsidian configuration.
 
+## Weekly Notes and Calendar compatibility
+
+Weekly Notes have separate **Weekly note folder** and **Weekly note format** settings, matching Calendar's terminology. The fallback defaults are `Weekly Notes` and `gggg-[W]ww`; a blank folder means the Vault root and a blank format uses the default. The folder is literal text. The format supports Moment tokens, literals, and nested date folders, evaluated at the week's start in UTC+8.
+
+The default is Calendar locale mode with English (US) and Sunday starts. Locale mode follows the selected locale's week-year and first-week rule, with locale-default, Sunday, or Monday starts. English (US), English (UK), and Traditional Chinese are available. ISO mode uses Monday and the January-4 rule. Preserve lowercase `gggg`/`ww` versus uppercase `GGGG`/`WW`: January 1, 2027 is `2027-W01` in English (US) locale weeks and `2026-W53` in ISO weeks. The This week button, week-grid header, list week button, and sidebar/month week buttons open Weekly Notes. Week buttons show a readable number, with the complete week-year and range in their accessible names and tooltips; the opened note panel shows the selected week and range.
+
+The planned plugin will follow Calendar's effective provider: enabled Periodic Notes weekly settings, otherwise Calendar's `weeklyNoteFormat`, `weeklyNoteFolder`, and `weeklyNoteTemplate`, otherwise Calendar-Note's fallback. The prototype accepts independently entered values and does not import Obsidian settings or apply Vault templates. Weekly Note edits stay in browser storage and can be downloaded as Markdown. They create no events or daily links. Reopening preserves content; cross-type path conflicts are rejected. See the [development manual](docs/manuals/DEVELOPMENT.md) for matching settings and future local installation.
+
 ## Data and limitations
 
-- Events, settings, and both note types are stored in the current browser's localStorage. Markdown files are exported only when downloaded. Clearing browser storage resets the prototype.
+- Events, settings, and all three note types are stored in the current browser's localStorage. Markdown files are exported only when downloaded. Clearing browser storage resets the prototype.
 - File URLs and HTTP URLs may use separate storage. If browser storage is unavailable, the current page remains usable, but changes may not survive a reload.
 - Use sample URLs. There are no live iCal requests, scheduled polling, Obsidian API calls, or remote writes.
 - Rescheduling an imported event creates a local override; it does not write back to the subscription provider.
@@ -105,16 +114,18 @@ Run from the repository root:
 node --check docs/changes/calendar-note/preview/app.js
 node --check docs/changes/calendar-note/preview/path-format.js
 node --check docs/changes/calendar-note/preview/event-core.js
+node --check docs/changes/calendar-note/preview/weekly-core.js
 node docs/changes/calendar-note/preview/smoke-test.cjs
 node docs/changes/calendar-note/preview/event-core.test.cjs
 node docs/changes/calendar-note/preview/daily-note.test.cjs
+node docs/changes/calendar-note/preview/weekly-note.test.cjs
 ```
 
-Week/date regression checks cover ISO week-year boundaries and direct Daily Note path resolution, preservation, and conflicts. Path tests cover Moment formats, locales, literal text, protected event variables, filename sanitization, Unicode byte limits, and relative paths. Event tests cover event-date journal paths, heading and code-fence boundaries, duplicate links, Markdown preservation, stable identity, overlap layout, and interval resizing.
+Week/date regression checks cover ISO and locale week-years, custom first weekdays, Weekly Note folder/format resolution, preservation/reload, shared paths, conflicts, and direct Daily Note resolution. Path tests cover Moment formats, locales, literal text, protected event variables, filename sanitization, Unicode byte limits, and relative paths. Event tests cover event-date journal paths, heading and code-fence boundaries, duplicate links, Markdown preservation, stable identity, overlap layout, and interval resizing.
 
 A temporary DOM simulation was also used to check initialization, creation without subscriptions, past-date links, deduplication, moving journal entries between dates, three-way overlap, resize and cancellation handlers, context-menu times, blank URL drafts, reload persistence, and collision rollback. The DOM test package is not a project runtime dependency.
 
-Browser checks for this revision verified direct date opening in week, month, day, and list views; empty dates and hidden sources; keyboard activation and focus return; shared content between event and direct-date entry points; saved custom path settings; and ISO week-years around New Year. Desktop and narrow layouts were visually inspected, including month/sidebar week gutters. Full browser drag-and-drop acceptance and actual Obsidian integration remain unverified; the core tests do not establish those behaviors.
+Browser checks for this revision verified direct date opening in week, month, day, and list views; empty dates and hidden sources; keyboard activation; shared content between event and direct-date entry points; and saved custom path settings. Weekly checks verified the current-week CTA, sidebar keyboard activation, month-button activation with sources hidden, Markdown autosave across notes and reload, a custom nested path, blank-folder root output, ISO and English (US) week-years around New Year, the locked Monday selector in ISO mode, and Traditional Chinese weekday labels. Desktop and 390 px narrow layouts were inspected; the month calendar scrolls within its panel, and closing a Weekly Note returns visible focus to the This week button. Full browser drag-and-drop acceptance and actual Obsidian integration remain unverified; the core tests do not establish those behaviors.
 
 ## Documentation lifecycle
 
@@ -126,7 +137,8 @@ Publishing a source branch to GitHub does not deploy a GitHub Pages site or rele
 
 - [TaskNotes](https://github.com/callumalpass/tasknotes), reviewed local revision `971e5c9a`: calendar views and event-note concepts.
 - [Obsidian Day Planner](https://github.com/ivan-lednev/obsidian-day-planner), reviewed local revision `9c483b36`: source configuration, caching, recurrence, and time zones.
+- [Calendar](https://github.com/liamcain/obsidian-calendar-plugin), reviewed revision `ef3f2696`: clickable weekly notes, weekly settings, and locale-based week rules.
 - [Daily Notes documentation](https://obsidian.md/help/plugins/daily-notes).
 - [Moment format documentation](https://momentjs.com/docs/#/displaying/format/).
 
-Both reference projects use the MIT license. The prototype does not import their full plugin architectures. The bundled Moment 2.30.1 license is in [MOMENT-LICENSE](docs/changes/calendar-note/preview/vendor/MOMENT-LICENSE). See [LICENSE](LICENSE) for this project's license.
+All three reference projects use the MIT license. The prototype does not import their full plugin architectures. The bundled Moment 2.30.1 license is in [MOMENT-LICENSE](docs/changes/calendar-note/preview/vendor/MOMENT-LICENSE). See [LICENSE](LICENSE) for this project's license.

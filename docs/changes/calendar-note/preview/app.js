@@ -9,7 +9,7 @@
   function read(key, fallback) { try { var value=localStorage.getItem(key); return value ? JSON.parse(value) : fallback; } catch (_) { storageAvailable=false; return fallback; } }
   function persist(key, value) { try { localStorage.setItem(key,JSON.stringify(value)); return true; } catch (_) { storageAvailable=false; return false; } }
   function isObject(value) { return value && typeof value==='object' && !Array.isArray(value); }
-  var defaults={pattern:'[Calendar Notes]/{title}',dailyPattern:'[Daily Notes]/YYYY-MM-DD',locale:'en',density:'comfortable',interval:'15',localEnabled:true,sources:[]};
+  var defaults={pattern:'[Calendar Notes]/{title}',dailyPattern:'[Daily Notes]/YYYY-MM-DD',weeklyFormat:'gggg-[W]ww',weeklyFolder:'Weekly Notes',weekMode:'calendar',weekStart:'locale',locale:'en',density:'comfortable',interval:'15',localEnabled:true,sources:[]};
   var sampleSources=[
     {id:'work',name:'Work',color:'#8270b4',url:'https://calendar.example.com/work.ics',enabled:true,sample:true},
     {id:'personal',name:'Personal',color:'#81967d',url:'webcal://calendar.example.com/personal.ics',enabled:true,sample:true},
@@ -21,7 +21,10 @@
   var formatSample={title:'Product strategy / Q4: Roadmap?',calendar:'Local events',uid:'sample',start:'2026-10-23T10:00:00+08:00'};
   if(isObject(saved)) {
     ['pattern','dailyPattern'].forEach(function(key){if(typeof saved[key]==='string'){try{if(key==='dailyPattern')EventCore.dailyPath(saved[key],formatSample,saved.locale);else CalendarPath.formatPath(saved[key],formatSample,saved.locale);settings[key]=saved[key];}catch(_){}}});
-    if(['zh-tw','en'].includes(saved.locale))settings.locale=saved.locale;
+    if(['zh-tw','en','en-gb'].includes(saved.locale))settings.locale=saved.locale;
+    if(typeof saved.weeklyFormat==='string'&&typeof saved.weeklyFolder==='string')try{WeeklyCore.weeklyPath(saved.weeklyFolder,saved.weeklyFormat,'2026-10-23',{mode:'calendar',locale:settings.locale,weekStart:'locale'});settings.weeklyFormat=saved.weeklyFormat;settings.weeklyFolder=saved.weeklyFolder;}catch(_){}
+    if(['calendar','iso'].includes(saved.weekMode))settings.weekMode=saved.weekMode;
+    if(['locale','sunday','monday'].includes(saved.weekStart))settings.weekStart=saved.weekStart;
     if(['comfortable','compact'].includes(saved.density))settings.density=saved.density;
     if(['5','15','30','60'].includes(saved.interval))settings.interval=saved.interval;
     settings.localEnabled=saved.localEnabled!==false;
@@ -58,14 +61,15 @@
     try{EventCore.validateInterval(e.start,e.end);return true;}catch(_){return false;}
   }
   var loaded=read('calendar-note-events-v2',null);
-  var data={localEvents:localExamples,overrides:{},dailyNotes:{},dailyLinks:{}};
+  var data={localEvents:localExamples,overrides:{},dailyNotes:{},dailyLinks:{},weeklyNotes:{}};
   if(isObject(loaded)) {
     if(Array.isArray(loaded.localEvents))data.localEvents=loaded.localEvents.filter(validEvent).filter(function(e,i,all){return all.findIndex(function(other){return other.uid===e.uid;})===i;}).map(function(e){return {source:'local',uid:e.uid,originalStart:e.originalStart||e.start,start:iso(m(e.start)),end:iso(m(e.end)),title:e.title.slice(0,120).replace(/[\r\n]/g,' '),location:typeof e.location==='string'?e.location:''};});
     if(isObject(loaded.overrides))Object.keys(loaded.overrides).forEach(function(key){var o=loaded.overrides[key];try{if(isObject(o)){EventCore.validateInterval(o.start,o.end);data.overrides[key]={start:o.start,end:o.end,allDay:o.allDay===true};}}catch(_){}});
     if(isObject(loaded.dailyNotes))Object.keys(loaded.dailyNotes).forEach(function(key){var n=loaded.dailyNotes[key];if(isObject(n)&&typeof n.path==='string'&&typeof n.content==='string')data.dailyNotes[key]={path:n.path,content:n.content};});
+    if(isObject(loaded.weeklyNotes))Object.keys(loaded.weeklyNotes).forEach(function(key){var n=loaded.weeklyNotes[key];if(isObject(n)&&typeof n.path==='string'&&typeof n.content==='string')data.weeklyNotes[pathKey(n.path)]={path:n.path,content:n.content};});
     if(isObject(loaded.dailyLinks))Object.keys(loaded.dailyLinks).forEach(function(key){var link=loaded.dailyLinks[key];if(isObject(link)&&typeof link.path==='string'&&typeof link.bullet==='string')data.dailyLinks[key]={path:link.path,bullet:link.bullet};});
   }
-  var state={view:'week',date:m('2026-10-23T12:00:00+08:00'),selected:null,dailyDate:null,dailyKey:null,noteTab:'event',editing:null,suppressClickUntil:0};
+  var state={view:'week',date:moment().utcOffset(480).locale('en'),selected:null,dailyDate:null,dailyKey:null,weeklyDate:null,weeklyKey:null,weekReturnFocus:null,noteTab:'event',editing:null,suppressClickUntil:0};
   var toastTimer,drag=null;
   function toast(message) { $('#toast').textContent=message;$('#toast').classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(function(){$('#toast').classList.remove('visible');},3800); }
   function saveSettings(message) { var ok=persist('calendar-note-settings-v1',settings);if(message)toast(ok?message:'Browser storage is unavailable; you can still use this page.'); }
@@ -81,7 +85,12 @@
   function visibleEvents() { return allEvents().filter(function(e){return EventCore.isEventVisible(e,settings.sources,settings.localEnabled);}); }
   function findEvent(key) { return allEvents().find(function(e){return eventKey(e)===key;}); }
   function hasNote(e) { return Boolean(notes[eventKey(e)]); }
-  function weekStart(value) { return value.clone().isoWeekday(1).startOf('day'); }
+  function weekOptions() { return {mode:settings.weekMode,locale:settings.locale,weekStart:settings.weekStart}; }
+  function weekInfo(value) { return WeeklyCore.weekInfo(typeof value==='string'?value:value.format('YYYY-MM-DD'),weekOptions()); }
+  function weekStart(value) { return m(weekInfo(value).start+'T00:00:00+08:00'); }
+  function todayText() { return moment().utcOffset(480).format('YYYY-MM-DD'); }
+  function weekTitle(week) { return 'Week '+week.number+' of '+week.year+' · '+week.start+' – '+week.end; }
+  function weekButton(value,cssClass) { var date=typeof value==='string'?value:value.format('YYYY-MM-DD'),week=weekInfo(date),label=weekTitle(week);return '<button type="button" class="'+cssClass+'" data-open-weekly="'+date+'" aria-label="Open Weekly Note for '+esc(label)+'" title="'+esc(label)+'">'+week.number+'</button>'; }
   function dayOf(e) { return m(e.start).format('YYYY-MM-DD'); }
   function timeText(e) { return e.allDay?'All day':m(e.start).format('HH:mm')+'–'+(m(e.end).date()!==m(e.start).date()?'24:00':m(e.end).format('HH:mm')); }
   function pathKey(path) { return path.normalize('NFC').toLowerCase(); }
@@ -89,14 +98,16 @@
   var iconSettings='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 3-1 3-3 1 1 3-2 2 2 2-1 3 3 1 1 3h5l1-3 3-1-1-3 2-2-2-2 1-3-3-1-1-3z"/><circle cx="11.5" cy="12" r="3"/></svg>';
   var iconDoc='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H5v18h14V8zM14 3v6h5M8 13h8M8 17h6"/></svg>';
   function renderSidebar() {
-    var page=document.body.dataset.page,mini='',first=state.date.clone().startOf('month').isoWeekday(1),selectedStart=weekStart(state.date).format('YYYY-MM-DD'),selectedEnd=weekStart(state.date).add(6,'days').format('YYYY-MM-DD');
-    mini+='<span class="mini-weekday week-gutter-heading" title="ISO 8601 week number">Wk</span>';
-    ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].forEach(function(d){mini+='<span class="mini-weekday" title="'+d+'" aria-label="'+d+'">'+d.slice(0,2)+'</span>';});
-    for(var i=0;i<42;i++){var day=first.clone().add(i,'days'),date=day.format('YYYY-MM-DD'),weekLabel=EventCore.isoWeekLabel(iso(day));if(i%7===0)mini+='<span class="mini-week-number" aria-label="ISO week '+weekLabel+'" title="ISO week '+weekLabel+'"><span>'+day.isoWeekYear()+'</span><span>W'+String(day.isoWeek()).padStart(2,'0')+'</span></span>';mini+='<button class="mini-day '+(day.month()!==state.date.month()?'outside ':'')+(date==='2026-10-23'?'today ':'')+(date>=selectedStart&&date<=selectedEnd?'selected-week':'')+'" data-mini-date="'+date+'" aria-label="Navigate calendar to '+day.format('MMMM D, YYYY')+'" title="Navigate calendar to '+day.format('MMMM D, YYYY')+'">'+day.date()+'</button>';}
+    var page=document.body.dataset.page,mini='',first=weekStart(state.date.clone().startOf('month')),selectedWeek=weekInfo(state.date),currentWeek=weekInfo(todayText()),selectedStart=selectedWeek.start,selectedEnd=selectedWeek.end,headings=[];
+    mini+='<span class="mini-weekday week-gutter-heading" aria-label="Week number">Wk</span>';
+    for(var headingIndex=0;headingIndex<7;headingIndex++){var headingDay=first.clone().add(headingIndex,'days').locale(settings.locale);headings.push({full:headingDay.format('dddd'),short:headingDay.format('dd')});}
+    headings.forEach(function(d){mini+='<span class="mini-weekday" title="'+esc(d.full)+'" aria-label="'+esc(d.full)+'">'+esc(d.short)+'</span>';});
+    for(var i=0;i<42;i++){var day=first.clone().add(i,'days'),date=day.format('YYYY-MM-DD'),rowWeek=weekInfo(date);if(i%7===0)mini+=weekButton(date,'mini-week-number'+(rowWeek.key===currentWeek.key?' is-current':'')+(rowWeek.key===selectedWeek.key?' is-viewed':''));mini+='<button class="mini-day '+(day.month()!==state.date.month()?'outside ':'')+(date===todayText()?'today ':'')+(date>=selectedStart&&date<=selectedEnd?'selected-week':'')+'" data-mini-date="'+date+'" aria-label="Navigate calendar to '+day.format('MMMM D, YYYY')+'" title="Navigate calendar to '+day.format('MMMM D, YYYY')+'">'+day.date()+'</button>';}
     function sourceToggle(s,enabled) {return '<label class="subscription-toggle" style="--source-color:'+s.color+'"><input type="checkbox" data-source-toggle="'+esc(s.id)+'" '+(enabled?'checked':'')+'><span>'+esc(s.name)+'</span><span class="source-count">'+allEvents().filter(function(e){return e.source===s.id;}).length+'</span></label>';}
     $('#sidebar').innerHTML='<a href="index.html" class="brand" aria-label="Calendar-Note home"><svg class="brand-icon" viewBox="0 0 36 38" fill="none" aria-hidden="true"><path d="M7 7h19l5 5v21H7z" fill="#e8e0f1"/><path d="M4 5h22v26H4z" fill="#967bb7"/><path d="M4 11h22M9 2v6M21 2v6" stroke="#f8f4fc" stroke-width="1.8" stroke-linecap="round"/><path d="M9 17h5v5H9zM17 17h5M17 21h5M9 26h13" stroke="#fff" stroke-width="1.3"/><path d="m23 28 6-7 3 3-6 7-4 1z" fill="#bea7d3" stroke="#f5effa"/></svg><span>Calendar-Note</span></a><div class="workspace-label">PERSONAL VAULT</div><nav class="nav-links" aria-label="Main navigation"><a class="nav-item '+(page==='calendar'?'active':'')+'" href="index.html" aria-label="Weekly calendar">'+iconCalendar+'<span>Weekly calendar</span></a><a class="nav-item '+(page==='settings'?'active':'')+'" href="settings.html" aria-label="Settings">'+iconSettings+'<span>Settings</span></a><a class="nav-item" href="../proposal.html" aria-label="Product proposal">'+iconDoc+'<span>Product proposal</span></a></nav><div class="mini-calendar"><div class="mini-header"><span>'+state.date.format('MMMM YYYY')+'</span><span>· · ·</span></div><div class="mini-grid">'+mini+'</div></div><div class="sidebar-section"><div class="sidebar-heading"><span>My calendars</span><a href="settings.html#subscriptions" aria-label="Manage subscriptions">＋</a></div>'+sourceToggle(localSource,settings.localEnabled)+settings.sources.map(function(s){return sourceToggle(s,s.enabled);}).join('')+(!settings.sources.length?'<p class="no-subscriptions">No iCal subscriptions · Local features ready</p>':'')+'</div><div class="sidebar-bottom"><span class="sync-dot"></span>Local demo · Browser storage<p>No external connections · Vault unchanged</p></div>';
     $$('[data-source-toggle]').forEach(function(input){input.addEventListener('change',function(){if(input.dataset.sourceToggle==='local')settings.localEnabled=input.checked;else {var s=settings.sources.find(function(x){return x.id===input.dataset.sourceToggle;});if(!s.url&&input.checked){input.checked=false;toast('This subscription is a draft. Add a URL to enable it. Local events remain available.');return;}s.enabled=input.checked;}saveSettings();if(page==='calendar')renderCalendar();else renderSources();});});
     $$('[data-mini-date]').forEach(function(button){button.addEventListener('click',function(){if(page==='calendar'){state.date=m(button.dataset.miniDate+'T12:00:00+08:00');renderCalendar();renderSidebar();}else location.href='index.html?date='+button.dataset.miniDate;});});
+    bindWeekButtons($('#sidebar'));
   }
   function eventCard(e,layout,minHour) {
     var from=m(e.start),to=m(e.end),top=from.diff(from.clone().startOf('day'),'minutes')-minHour*60,height=to.diff(from,'minutes');
@@ -117,33 +128,37 @@
     var end=start.clone().add(state.view==='month'?1:state.view==='day'?1:7,state.view==='month'?'month':'days');
     var relevant=visibleEvents().filter(function(e){return dayOf(e)>=start.format('YYYY-MM-DD')&&dayOf(e)<end.format('YYYY-MM-DD');});
     $('#month-title').textContent=state.date.format('MMMM YYYY');
-    var weekReference=state.view==='day'?state.date:start;
-    $('#date-range').textContent=state.view==='month'?state.date.format('YYYY / M'):state.view==='day'?start.format('MMM D, YYYY')+' · ISO '+EventCore.isoWeekLabel(iso(weekReference)):start.format('MMM D')+' – '+end.clone().subtract(1,'day').format(start.month()===end.clone().subtract(1,'day').month()?'D':'MMM D')+' · ISO '+EventCore.isoWeekLabel(iso(weekReference));
+    var weekReference=state.date;
+    var viewedWeek=weekInfo(weekReference),currentWeek=weekInfo(todayText());
+    $('#date-range').textContent=state.view==='month'?state.date.format('YYYY / M'):state.view==='day'?start.format('MMM D, YYYY')+' · Week '+viewedWeek.number:start.format('MMM D')+' – '+end.clone().subtract(1,'day').format(start.month()===end.clone().subtract(1,'day').month()?'D':'MMM D')+' · Week '+viewedWeek.number;
+    $('#current-week-number').textContent=currentWeek.number;
+    $('#current-week-note').setAttribute('aria-label','Open this week’s Weekly Note: '+weekTitle(currentWeek));
+    $('#current-week-note').title=weekTitle(currentWeek);
     $$('[data-view]').forEach(function(b){b.classList.toggle('active',b.dataset.view===state.view);b.setAttribute('aria-pressed',String(b.dataset.view===state.view));});
     var html='';
     if(state.view==='list') {
-      html='<div class="list-view">';
+      html='<div class="list-view"><div class="list-week-heading"><span>Week '+viewedWeek.number+' · '+viewedWeek.start+' – '+viewedWeek.end+'</span>'+weekButton(start,'list-week-number')+'</div>';
       for(var li=0;li<7;li++){var listDay=start.clone().add(li,'days'),group=relevant.filter(function(e){return dayOf(e)===listDay.format('YYYY-MM-DD');}).sort(function(a,b){return a.start.localeCompare(b.start);});html+='<h3 class="list-day"><button class="date-open" data-open-daily="'+listDay.format('YYYY-MM-DD')+'" aria-label="Open Daily Note for '+listDay.format('MMMM D, YYYY')+'">'+listDay.locale('en').format('MMMM D · dddd')+'</button></h3>'+(group.length?group.map(function(e){return '<button class="list-event" data-event="'+esc(eventKey(e))+'"><time>'+timeText(e)+'</time><span class="color-dot" style="--source-color:'+sourceOf(e).color+'"></span><strong>'+esc(e.title)+'</strong><span class="list-source">'+esc(sourceName(e))+(e.localOverride?' · Local changes':'')+'</span><span style="color:#927ca3">'+(hasNote(e)?'▤':'↗')+'</span></button>';}).join(''):'<p class="list-day-empty">No events · Open this date’s Daily Note</p>');}
       html+='</div>';
     } else if(state.view==='month') {
-      html='<div class="calendar-scroll"><div class="month-head"><span class="week-gutter-heading" title="ISO 8601 week number">Wk</span>'+['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(function(d){return '<span>'+d+'</span>';}).join('')+'</div><div class="month-grid">';
+      html='<div class="calendar-scroll"><div class="month-head"><span class="week-gutter-heading" aria-label="Week number">Wk</span>'+Array.from({length:7},function(_,i){return '<span>'+esc(weekStart(start).add(i,'days').locale(settings.locale).format('ddd'))+'</span>';}).join('')+'</div><div class="month-grid">';
       var monthStart=weekStart(start);
-      for(var mi=0;mi<42;mi++){var d=monthStart.clone().add(mi,'days'),day=d.format('YYYY-MM-DD');if(mi%7===0)html+='<div class="month-week-number" title="ISO week '+EventCore.isoWeekLabel(iso(d))+'">'+EventCore.isoWeekLabel(iso(d))+'</div>';html+='<div class="month-cell '+(d.month()!==state.date.month()?'outside':'')+'"><button class="month-date '+(day==='2026-10-23'?'today':'')+'" data-open-daily="'+day+'" aria-label="Open Daily Note for '+d.format('MMMM D, YYYY')+'">'+d.date()+'</button>'+visibleEvents().filter(function(e){return dayOf(e)===day;}).map(function(e){return '<button class="month-event" data-event="'+esc(eventKey(e))+'" style="--event-color:'+sourceOf(e).color+'">'+(e.allDay?'All day':m(e.start).format('HH:mm'))+' '+esc(e.title)+'</button>';}).join('')+'</div>';}
+      for(var mi=0;mi<42;mi++){var d=monthStart.clone().add(mi,'days'),day=d.format('YYYY-MM-DD');if(mi%7===0)html+='<div class="month-week-number">'+weekButton(day,'month-week-button'+(weekInfo(day).key===currentWeek.key?' is-current':'')+(weekInfo(day).key===viewedWeek.key?' is-viewed':''))+'</div>';html+='<div class="month-cell '+(d.month()!==state.date.month()?'outside':'')+'"><button class="month-date '+(day===todayText()?'today':'')+'" data-open-daily="'+day+'" aria-label="Open Daily Note for '+d.format('MMMM D, YYYY')+'">'+d.date()+'</button>'+visibleEvents().filter(function(e){return dayOf(e)===day;}).map(function(e){return '<button class="month-event" data-event="'+esc(eventKey(e))+'" style="--event-color:'+sourceOf(e).color+'">'+(e.allDay?'All day':m(e.start).format('HH:mm'))+' '+esc(e.title)+'</button>';}).join('')+'</div>';}
       html+='</div></div>';
     } else {
       var count=state.view==='day'?1:7,minHour=8,maxHour=19;
       relevant.filter(function(e){return !e.allDay;}).forEach(function(e){minHour=Math.min(minHour,m(e.start).hour());var ending=m(e.end).diff(m(e.start).startOf('day'),'minutes')/60;maxHour=Math.max(maxHour,Math.ceil(ending));});
       maxHour=Math.min(24,maxHour);var gridHeight=(maxHour-minHour)*60;
-      html='<div class="calendar-scroll"><div class="week-wrap" style="--days:'+count+';'+(count===1?'min-width:400px;':'')+'--grid-height:'+gridHeight+'px"><div class="calendar-head"><div class="head-zone">GMT+8</div>';
-      for(var h=0;h<count;h++){var hd=start.clone().add(h,'days');html+='<div class="day-heading '+(hd.format('YYYY-MM-DD')==='2026-10-23'?'is-today ':'')+(hd.isoWeekday()>5?'weekend':'')+'"><button class="date-open" data-open-daily="'+hd.format('YYYY-MM-DD')+'" aria-label="Open Daily Note for '+hd.format('MMMM D, YYYY')+'"><span class="day-name">'+['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][hd.day()]+'</span><span class="day-number">'+hd.date()+'</span></button></div>';}
+      html='<div class="calendar-scroll"><div class="week-wrap" style="--days:'+count+';'+(count===1?'min-width:400px;':'')+'--grid-height:'+gridHeight+'px"><div class="calendar-head"><div class="head-zone">'+weekButton(start,'head-week-number'+(viewedWeek.key===currentWeek.key?' is-current':''))+'</div>';
+      for(var h=0;h<count;h++){var hd=start.clone().add(h,'days');html+='<div class="day-heading '+(hd.format('YYYY-MM-DD')===todayText()?'is-today ':'')+(hd.isoWeekday()>5?'weekend':'')+'"><button class="date-open" data-open-daily="'+hd.format('YYYY-MM-DD')+'" aria-label="Open Daily Note for '+hd.format('MMMM D, YYYY')+'"><span class="day-name">'+['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][hd.day()]+'</span><span class="day-number">'+hd.date()+'</span></button></div>';}
       html+='</div><div class="all-day-grid"><div class="all-day-label">All day</div>';
       for(var a=0;a<count;a++){var ad=start.clone().add(a,'days').format('YYYY-MM-DD');html+='<div class="all-day-cell">'+relevant.filter(function(e){return e.allDay&&dayOf(e)===ad;}).map(function(e){return '<button class="all-day-event" data-event="'+esc(eventKey(e))+'" style="--event-color:'+sourceOf(e).color+'">'+esc(e.title)+'</button>';}).join('')+'</div>';}
       html+='</div><div class="time-grid"><div class="time-labels">';for(var t=minHour;t<maxHour;t++)html+='<span class="time-label" style="--hour:'+(t-minHour)+'">'+String(t).padStart(2,'0')+':00</span>';html+='</div>';
-      for(var c=0;c<count;c++){var cd=start.clone().add(c,'days'),today=cd.format('YYYY-MM-DD')==='2026-10-23',dayEvents=relevant.filter(function(e){return !e.allDay&&dayOf(e)===cd.format('YYYY-MM-DD');});
+      for(var c=0;c<count;c++){var cd=start.clone().add(c,'days'),today=cd.format('YYYY-MM-DD')===todayText(),dayEvents=relevant.filter(function(e){return !e.allDay&&dayOf(e)===cd.format('YYYY-MM-DD');});
         html+='<div class="day-column '+(today?'is-today ':'')+(cd.isoWeekday()>5?'weekend':'')+'" data-grid-day="'+cd.format('YYYY-MM-DD')+'" data-min-hour="'+minHour+'" data-max-hour="'+maxHour+'" aria-label="'+cd.format('MMM D')+' time grid">';
         var layouts=EventCore.layoutOverlaps(dayEvents.map(function(e){return {id:eventKey(e),start:m(e.start).valueOf(),end:m(e.end).valueOf()};}));
         html+=dayEvents.map(function(e){return eventCard(e,layouts.find(function(l){return l.id===eventKey(e);}),minHour);}).join('');
-        if(today&&minHour<=13&&maxHour>13)html+='<div class="current-time" style="--now-top:'+((13-minHour)*60+15)+'px"></div><span class="sample-time" style="--now-top:'+((13-minHour)*60+15)+'px">13:15 demo time</span>';
+        var now=moment().utcOffset(480);if(today&&minHour<=now.hour()&&maxHour>now.hour())html+='<div class="current-time" style="--now-top:'+((now.hour()-minHour)*60+now.minute())+'px"></div>';
         html+='</div>';
       }
       html+='</div></div></div>';
@@ -151,16 +166,47 @@
     }
     $('#calendar').innerHTML=html;bindEventButtons($('#calendar'));bindTimeGrid();
     $$('[data-open-daily]').forEach(function(b){b.addEventListener('click',function(){openDailyDate(b.dataset.openDaily);});});
+    bindWeekButtons($('#calendar'));
     if(previousScroll&&$('.calendar-scroll')){$('.calendar-scroll').scrollTop=previousScroll.top;$('.calendar-scroll').scrollLeft=previousScroll.left;}
-    if(!state.selected&&!state.dailyDate)renderAgenda();
+    if(!state.selected&&!state.dailyDate&&!state.weeklyDate)renderAgenda();
   }
   function renderAgenda() {
     var agendaDay=state.date.clone().startOf('day'),items=visibleEvents().filter(function(e){return dayOf(e)===agendaDay.format('YYYY-MM-DD');}).sort(function(a,b){return a.start.localeCompare(b.start);});
     $('#note-panel').innerHTML='<div class="agenda-heading"><div class="eyebrow">YOUR DAY · LOCAL DEMO</div><h2>'+agendaDay.format('MMM D')+' <span style="color:#9685a2;font-size:11px">'+agendaDay.locale('en').format('dddd')+'</span></h2><p>'+items.length+' events, each with a place for notes.</p></div><div class="agenda-list">'+items.map(function(e){return '<button class="agenda-item" data-event="'+esc(eventKey(e))+'" style="--event-color:'+sourceOf(e).color+'"><span class="agenda-time">'+(e.allDay?'All day':m(e.start).format('HH:mm'))+'</span><span class="agenda-mark"></span><div><h3>'+esc(e.title)+'</h3><p>'+esc(sourceName(e))+' · '+(hasNote(e)?'Open note':'Create note and daily link')+'</p></div></button>';}).join('')+'</div><div class="agenda-help"><div class="empty-icon">▤</div><h3>One event, two ways in</h3><p>Event Note holds the full record.<br>Daily Note keeps a link in its Event section.<br>Try the local demo event on October 22.</p><button id="agenda-create" class="button">＋ New local event</button></div>';
     bindEventButtons($('#note-panel'));$('#agenda-create').addEventListener('click',function(){openEventDialog(null,state.date.clone().hour(10).minute(0).second(0));});
   }
+  function bindWeekButtons(root) {
+    $$('[data-open-weekly]',root).forEach(function(button){button.addEventListener('click',function(){if(document.body.dataset.page==='settings')location.href='index.html?weekly='+encodeURIComponent(button.dataset.openWeekly);else openWeeklyNote(button.dataset.openWeekly,{focusButton:button});});});
+  }
+  function closeWeeklyNote() {
+    var returnSelector=state.weekReturnFocus;
+    state.weeklyDate=null;state.weeklyKey=null;state.weekReturnFocus=null;
+    renderCalendar();
+    var button=returnSelector?$(returnSelector):null;
+    (button||$('#current-week-note')).focus();
+  }
+  function renderWeeklyPanel() {
+    var note=data.weeklyNotes[state.weeklyKey],week=weekInfo(state.weeklyDate);
+    if(!note){closeWeeklyNote();return;}
+    $('#note-panel').innerHTML='<div class="panel-topline"><span class="panel-label">▤ Weekly Note · Browser demo</span><button id="close-note" class="icon-button" aria-label="Close Weekly Note">×</button></div><div class="note-content"><h2>Week '+week.number+' <span class="week-year">'+week.year+'</span></h2><div class="note-meta">'+week.start+' – '+week.end+' · Asia/Taipei (UTC+8)</div><div class="note-path"><span>WEEKLY NOTE · VAULT-RELATIVE PATH (SIMULATED)</span><code>'+esc(note.path)+'</code></div><div class="editor-label"><label for="note-editor">WEEKLY NOTE · MARKDOWN</label><span id="note-save-state">'+(storageAvailable?'Saved automatically in this browser':'Available for this page only')+'</span></div><textarea class="note-editor weekly-editor" id="note-editor" spellcheck="false" aria-label="Weekly Note Markdown content">'+esc(note.content)+'</textarea><div class="note-actions"><button class="button primary" id="download-note">↓ Download Weekly .md</button></div><p class="simulation-note">This browser prototype stores the note in your browser only. It does not write to your Vault or import Obsidian settings.</p></div>';
+    $('#close-note').addEventListener('click',closeWeeklyNote);
+    $('#note-editor').addEventListener('input',function(){data.weeklyNotes[state.weeklyKey].content=this.value;$('#note-save-state').textContent=saveData()?'Saved in this browser':'Saved for this page only';});
+    $('#download-note').addEventListener('click',function(){var current=data.weeklyNotes[state.weeklyKey],url=URL.createObjectURL(new Blob([current.content],{type:'text/markdown;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download=current.path.split('/').pop();a.click();setTimeout(function(){URL.revokeObjectURL(url);},500);toast('Downloaded the complete Weekly Note');});
+  }
+  function openWeeklyNote(dateText,options) {
+    options=options||{};
+    try {
+      var day=m(dateText+'T12:00:00+08:00');
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(dateText)||!day.isValid()||day.format('YYYY-MM-DD')!==dateText)throw new Error('Choose a valid calendar week.');
+      var opened=WeeklyCore.ensureWeeklyNote(data.weeklyNotes,notes,data.dailyNotes,settings.weeklyFolder,settings.weeklyFormat,dateText,weekOptions());
+      saveData();state.date=day;state.selected=null;state.dailyDate=null;state.dailyKey=null;state.weeklyDate=dateText;state.weeklyKey=opened.key;state.weekReturnFocus=options.focusButton?(options.focusButton.id?'#'+options.focusButton.id:(options.focusButton.closest('#sidebar')?'#sidebar ':'#calendar ')+'[data-open-weekly="'+dateText+'"]'):null;
+      renderCalendar();renderSidebar();renderWeeklyPanel();
+      requestAnimationFrame(function(){if(window.matchMedia('(max-width: 1350px)').matches)$('#note-panel').scrollIntoView({behavior:'smooth',block:'start'});$('#note-editor').focus({preventScroll:true});});
+      if(opened.created)toast('Created Weekly Note for Week '+opened.week.number);
+    } catch(error){toast(error.message);}
+  }
   function uniqueNotePath(path) {
-    var used=Object.values(notes).concat(Object.values(data.dailyNotes)).map(function(n){return pathKey(n.path);}),base=path.replace(/\.md$/i,''),suffix=2;
+    var used=Object.values(notes).concat(Object.values(data.dailyNotes),Object.values(data.weeklyNotes)).map(function(n){return pathKey(n.path);}),base=path.replace(/\.md$/i,''),suffix=2;
     while(used.includes(pathKey(path)))path=base+' ('+(suffix++)+').md';
     return path;
   }
@@ -169,6 +215,7 @@
     var notePath=existing?existing.path:uniqueNotePath(CalendarPath.formatPath(settings.pattern,sample,settings.locale));
     var diaryPath=EventCore.dailyPath(settings.dailyPattern,sample,settings.locale),diaryKey=pathKey(diaryPath);
     if(pathKey(notePath)===diaryKey||Object.values(notes).some(function(n){return pathKey(n.path)===diaryKey;}))throw new Error('The Daily Note path matches an existing Event Note. Update the path settings; existing content is preserved.');
+    if(data.weeklyNotes[pathKey(notePath)]||data.weeklyNotes[diaryKey])throw new Error('An Event or Daily Note path matches an existing Weekly Note. Update the path settings; existing content is preserved.');
     if(!existing)notes[key]={path:notePath,content:'# '+e.title+'\n\n## Preparation\n\n- \n\n## Discussion and notes\n\n\n## Follow-up\n\n- [ ] '};
     notes[key].content=EventCore.updateFrontmatter(notes[key].content,e);
     var previous=data.dailyLinks[key];
@@ -190,10 +237,12 @@
     try {
       var day=m(dateText+'T12:00:00+08:00');
       if(!/^\d{4}-\d{2}-\d{2}$/.test(dateText)||!day.isValid()||day.format('YYYY-MM-DD')!==dateText)throw new Error('Choose a valid calendar date.');
+      var directPath=EventCore.dailyPath(settings.dailyPattern,{start:dateText+'T00:00:00+08:00'},settings.locale);
+      if(data.weeklyNotes[pathKey(directPath)])throw new Error('The Daily Note path matches an existing Weekly Note. Update the path settings; existing content is preserved.');
       var opened=EventCore.ensureDirectDailyNote(data.dailyNotes,notes,settings.dailyPattern,dateText,settings.locale);
-      saveData();state.date=day;state.selected=null;state.dailyDate=dateText;state.dailyKey=opened.key;
+      saveData();state.date=day;state.selected=null;state.weeklyDate=null;state.weeklyKey=null;state.dailyDate=dateText;state.dailyKey=opened.key;
       renderCalendar();renderSidebar();renderDirectDailyPanel();
-      requestAnimationFrame(function(){if(window.matchMedia('(max-width: 1250px)').matches)$('#note-panel').scrollIntoView({behavior:'smooth',block:'start'});$('#close-note').focus({preventScroll:true});});
+      requestAnimationFrame(function(){if(window.matchMedia('(max-width: 1350px)').matches)$('#note-panel').scrollIntoView({behavior:'smooth',block:'start'});$('#close-note').focus({preventScroll:true});});
     } catch(error){toast(error.message);}
   }
   function renderNotePanel(e,artifacts) {
@@ -210,7 +259,7 @@
   }
   function openNote(e,options) {
     if(!e)return;options=options||{};
-    try {var artifacts=withTransaction(function(){return ensureArtifacts(e);});saveData();if(state.dailyDate||options.resetTab)state.noteTab='event';state.dailyDate=null;state.dailyKey=null;state.selected=eventKey(e);renderNotePanel(e,artifacts);renderCalendar();if(options.scroll!==false&&window.matchMedia('(max-width: 1250px)').matches)requestAnimationFrame(function(){$('#note-panel').scrollIntoView({behavior:'smooth',block:'start'});$('#tab-'+state.noteTab).focus({preventScroll:true});});if(artifacts.created&&!options.quiet)toast('Created Event Note and linked it to the Daily Note for '+m(e.start).format('MMM D'));}
+    try {var artifacts=withTransaction(function(){return ensureArtifacts(e);});saveData();if(state.dailyDate||state.weeklyDate||options.resetTab)state.noteTab='event';state.dailyDate=null;state.dailyKey=null;state.weeklyDate=null;state.weeklyKey=null;state.selected=eventKey(e);renderNotePanel(e,artifacts);renderCalendar();if(options.scroll!==false&&window.matchMedia('(max-width: 1350px)').matches)requestAnimationFrame(function(){$('#note-panel').scrollIntoView({behavior:'smooth',block:'start'});$('#tab-'+state.noteTab).focus({preventScroll:true});});if(artifacts.created&&!options.quiet)toast('Created Event Note and linked it to the Daily Note for '+m(e.start).format('MMM D'));}
     catch(err){toast(err.message);}
   }
   function showDetails(e) {
@@ -263,9 +312,10 @@
     });
   }
   function initCalendar() {
-    var dateParam=new URLSearchParams(location.search).get('date');if(dateParam&&/^\d{4}-\d{2}-\d{2}$/.test(dateParam)&&moment(dateParam,'YYYY-MM-DD',true).isValid())state.date=m(dateParam+'T12:00:00+08:00');
+    var params=new URLSearchParams(location.search),dateParam=params.get('date'),weeklyParam=params.get('weekly');if(dateParam&&/^\d{4}-\d{2}-\d{2}$/.test(dateParam)&&moment(dateParam,'YYYY-MM-DD',true).isValid())state.date=m(dateParam+'T12:00:00+08:00');
     $$('[data-view]').forEach(function(b){b.addEventListener('click',function(){state.view=b.dataset.view;renderCalendar();});});
     $('#today-button').addEventListener('click',function(){state.date=moment().utcOffset(480).locale('en');renderCalendar();renderSidebar();});
+    $('#current-week-note').addEventListener('click',function(){openWeeklyNote(todayText(),{focusButton:$('#current-week-note')});});
     function move(direction){state.date.add(direction,state.view==='month'?'month':state.view==='day'?'day':'week');renderCalendar();renderSidebar();}
     $('#prev-button').addEventListener('click',function(){move(-1);});$('#next-button').addEventListener('click',function(){move(1);});
     $('#new-event').addEventListener('click',function(){openEventDialog(null,state.date.clone().hour(10).minute(0).second(0));});
@@ -284,6 +334,7 @@
       } catch(err){$('#event-error').textContent=err.message;}
     });
     renderCalendar();renderSidebar();
+    if(weeklyParam)openWeeklyNote(weeklyParam);
   }
   var editingSource=null;
   function renderSources() {
@@ -298,12 +349,12 @@
   }
   function sampleEvent() { return {title:$('#sample-title').value,calendar:$('#sample-calendar').value,uid:'roadmap-20261023',start:$('#sample-start').value+':00+08:00'}; }
   function updatePathPreview() {
-    var valid=true;try{var sample=sampleEvent(),eventPath=CalendarPath.formatPath($('#path-pattern').value,sample,$('#date-locale').value),diaryPath=EventCore.dailyPath($('#daily-pattern').value,sample,$('#date-locale').value);$('#path-result').textContent=eventPath;$('#daily-path-result').textContent=diaryPath;if(pathKey(eventPath)===pathKey(diaryPath))throw new Error('Event Note and Daily Note must use different paths to preserve their separate content.');$('#path-error').textContent='';}
+    var valid=true;try{var sample=sampleEvent(),locale=$('#date-locale').value,options={mode:$('#week-mode').value,weekStart:$('#week-start').value,locale:locale},eventPath=CalendarPath.formatPath($('#path-pattern').value,sample,locale),diaryPath=EventCore.dailyPath($('#daily-pattern').value,sample,locale),weeklyPath=WeeklyCore.weeklyPath($('#weekly-folder').value,$('#weekly-format').value,sample.start,options),week=WeeklyCore.weekInfo(sample.start,options);$('#path-result').textContent=eventPath;$('#daily-path-result').textContent=diaryPath;$('#weekly-path-result').textContent=weeklyPath;$('#weekly-preview-label').textContent='Weekly Note · Week '+week.number+' of '+week.year+' · '+week.start+' – '+week.end;if(pathKey(eventPath)===pathKey(diaryPath)||pathKey(eventPath)===pathKey(weeklyPath)||pathKey(diaryPath)===pathKey(weeklyPath))throw new Error('Event, Daily, and Weekly Notes need different paths to preserve their separate content.');$('#path-error').textContent='';}
     catch(err){$('#path-error').textContent=err.message;valid=false;}
     $('#save-path').disabled=!valid;$$('.path-result').forEach(function(box){box.classList.toggle('invalid',!valid);});$('#clean-title').textContent='Filename cleanup: '+($('#sample-title').value||'(empty)')+' → '+CalendarPath.cleanSegment($('#sample-title').value);$('#save-status').textContent='';return valid;
   }
   function initSettings() {
-    renderSources();$('#path-pattern').value=settings.pattern;$('#daily-pattern').value=settings.dailyPattern;$('#date-locale').value=settings.locale;$('#density').value=settings.density;$('#sync-interval').value=settings.interval;updatePathPreview();
+    renderSources();$('#path-pattern').value=settings.pattern;$('#daily-pattern').value=settings.dailyPattern;$('#weekly-format').value=settings.weeklyFormat;$('#weekly-folder').value=settings.weeklyFolder;$('#week-mode').value=settings.weekMode;$('#week-start').value=settings.weekStart;$('#date-locale').value=settings.locale;$('#density').value=settings.density;$('#sync-interval').value=settings.interval;syncWeekControls();updatePathPreview();
     $('#add-source').addEventListener('click',function(){openSource();});
     $('#load-demo-sources').addEventListener('click',function(){sampleSources.forEach(function(example){var existing=settings.sources.find(function(s){return s.id===example.id;});if(existing){existing.sample=true;existing.url=example.url;existing.enabled=true;}else settings.sources.push(Object.assign({},example));});saveSettings('Loaded 3 fictional subscriptions; no network requests sent');renderSources();renderSidebar();});
     $('#source-form').addEventListener('submit',function(ev){
@@ -315,20 +366,22 @@
       else settings.sources.push({id:'source-'+Date.now(),name:name,url:url,color:$('#source-color').value,enabled:Boolean(url),sample:false});
       saveSettings(url?'Saved demo subscription settings · URL will not be fetched':'Saved draft · Local features remain available');renderSources();renderSidebar();$('#source-dialog').close();
     });
-    ['#path-pattern','#daily-pattern','#sample-title','#sample-start','#sample-calendar','#date-locale'].forEach(function(selector){$(selector).addEventListener('input',updatePathPreview);});
+    ['#path-pattern','#daily-pattern','#weekly-format','#weekly-folder','#week-start','#sample-title','#sample-start','#sample-calendar','#date-locale'].forEach(function(selector){$(selector).addEventListener('input',updatePathPreview);});
+    $('#week-mode').addEventListener('change',function(){syncWeekControls();updatePathPreview();});
     $$('[data-pattern]').forEach(function(button){button.addEventListener('click',function(){$('#path-pattern').value=button.dataset.pattern;updatePathPreview();});});
     $$('[data-daily-pattern]').forEach(function(button){button.addEventListener('click',function(){$('#daily-pattern').value=button.dataset.dailyPattern;updatePathPreview();});});
-    $('#path-form').addEventListener('submit',function(ev){ev.preventDefault();if(!updatePathPreview())return;settings.pattern=$('#path-pattern').value.trim();settings.dailyPattern=$('#daily-pattern').value.trim();settings.locale=$('#date-locale').value;saveSettings('Saved Event Note and Daily Note paths');$('#save-status').textContent=storageAvailable?'✓ Saved':'Saved for this page only';});
-    $('#reset-path').addEventListener('click',function(){$('#path-pattern').value=defaults.pattern;$('#daily-pattern').value=defaults.dailyPattern;$('#date-locale').value=defaults.locale;updatePathPreview();toast('Defaults applied; save to keep them');});
+    $('#path-form').addEventListener('submit',function(ev){ev.preventDefault();if(!updatePathPreview())return;settings.pattern=$('#path-pattern').value.trim();settings.dailyPattern=$('#daily-pattern').value.trim();settings.weeklyFormat=$('#weekly-format').value.trim();settings.weeklyFolder=$('#weekly-folder').value.trim();settings.weekMode=$('#week-mode').value;settings.weekStart=$('#week-start').value;settings.locale=$('#date-locale').value;saveSettings('Saved Event, Daily, and Weekly Note paths');renderSidebar();$('#save-status').textContent=storageAvailable?'✓ Saved':'Saved for this page only';});
+    $('#reset-path').addEventListener('click',function(){$('#path-pattern').value=defaults.pattern;$('#daily-pattern').value=defaults.dailyPattern;$('#weekly-format').value=defaults.weeklyFormat;$('#weekly-folder').value=defaults.weeklyFolder;$('#week-mode').value=defaults.weekMode;$('#week-start').value=defaults.weekStart;$('#date-locale').value=defaults.locale;syncWeekControls();updatePathPreview();toast('Defaults applied; save to keep them');});
     $('#density').addEventListener('change',function(){settings.density=this.value;saveSettings('Saved card density');});
     $('#sync-interval').addEventListener('change',function(){settings.interval=this.value;saveSettings('Saved sync preference · This prototype does not connect automatically');});
     $$('.settings-nav a').forEach(function(a){a.addEventListener('click',function(){$$('.settings-nav a').forEach(function(x){x.classList.toggle('active',x===a);});});});
   }
+  function syncWeekControls() { var isoMode=$('#week-mode').value==='iso';if(isoMode)$('#week-start').value='monday';$('#week-start').disabled=isoMode;$('#week-start').title=isoMode?'ISO 8601 weeks always begin Monday':''; }
   renderSidebar();if(document.body.dataset.page==='calendar')initCalendar();else initSettings();
   $$('[data-close-dialog]').forEach(function(button){button.addEventListener('click',function(){button.closest('dialog').close();});});
   $$('dialog').forEach(function(dialog){dialog.addEventListener('click',function(ev){if(ev.target===dialog){var rect=dialog.getBoundingClientRect();if(ev.clientX<rect.left||ev.clientX>rect.right||ev.clientY<rect.top||ev.clientY>rect.bottom)dialog.close();}});});
   document.addEventListener('pointerdown',function(ev){if(!ev.target.closest('#event-context-menu'))hideContext(false);});
-  document.addEventListener('keydown',function(ev){if(ev.key==='Escape'){if($('#event-context-menu')&&!$('#event-context-menu').hidden){hideContext(true);return;}if((state.selected||state.dailyDate)&&!document.querySelector('dialog[open]')){var date=state.dailyDate;state.selected=null;state.dailyDate=null;state.dailyKey=null;renderCalendar();if(date){var button=$('[data-open-daily="'+date+'"]');if(button)button.focus();}}}});
+  document.addEventListener('keydown',function(ev){if(ev.key==='Escape'){if($('#event-context-menu')&&!$('#event-context-menu').hidden){hideContext(true);return;}if(!document.querySelector('dialog[open]')&&state.weeklyDate){closeWeeklyNote();return;}if((state.selected||state.dailyDate)&&!document.querySelector('dialog[open]')){var date=state.dailyDate;state.selected=null;state.dailyDate=null;state.dailyKey=null;renderCalendar();if(date){var button=$('[data-open-daily="'+date+'"]');if(button)button.focus();}}}});
   window.addEventListener('resize',function(){hideContext(false);});
   if(!storageAvailable)toast('Local storage is unavailable; you can still use this page.');
 })();

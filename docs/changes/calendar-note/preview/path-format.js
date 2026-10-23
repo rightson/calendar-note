@@ -57,7 +57,15 @@
     var date = momentLib.parseZone(event.start, momentLib.ISO_8601, true);
     if (!date.isValid()) throw new Error('Enter a valid event start time.');
     if (dateOnly) date.utcOffset(480).startOf('day');
-    var formatted = date.locale(locale || 'en').format(protectedPattern);
+    date.locale(locale || 'en');
+    if (options && options.weekSpec) {
+      // Override only this Moment instance; Calendar's week-start setting must
+      // never change the global locale used by Event and Daily Notes.
+      var scopedLocale = Object.create(date.localeData());
+      scopedLocale._week = {dow:options.weekSpec.dow,doy:options.weekSpec.doy};
+      date._locale = scopedLocale;
+    }
+    var formatted = date.format(protectedPattern);
     formatted = formatted.replace(/⟦CNPLACEHOLDER(\d+)⟧/g, function(_, n) { return tokens[Number(n)]; });
     if (formatted.split('/').some(function(s) { return s.trim() === '..' || s.trim() === '.' || !s.trim(); })) throw new Error('The pattern produced an invalid folder.');
     var parts = formatted.split('/').map(cleanSegment);
