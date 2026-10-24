@@ -38,6 +38,7 @@
 .cn-mini .is-selected { background: var(--interactive-accent); color: var(--text-on-accent); }
 .cn-mini .is-outside { opacity: .55; }
 .cn-list-dates { margin-bottom: 12px; }
+.cn-list-dates.is-hidden { display: none; }
 .cn-list-date-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
 .cn-list-date-buttons button { flex: 1 1 70px; }
 .cn-list-date-buttons button:first-child { flex: 0 0 auto; }

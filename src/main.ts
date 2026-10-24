@@ -86,6 +86,7 @@ export default class CalendarNotePlugin extends Plugin {
     // wikilinks. Complete our tracked Daily entry only after that public
     // renameFile Promise resolves, so both writers never race on offsets.
     const manager = this.app.fileManager;
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- Keep the exact method for restoration; invoke it with manager as this.
     const originalRename = manager.renameFile;
     const wrappedRename: typeof originalRename = async (file, newPath) => {
       const result = await originalRename.call(manager, file, newPath);

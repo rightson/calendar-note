@@ -134,7 +134,8 @@ export function parseICalendar(
   }
   let calendar: InstanceType<typeof ICAL.Component>;
   try {
-    const parsed = ICAL.parse(raw);
+    const parsed: unknown = ICAL.parse(raw);
+    if (!Array.isArray(parsed)) throw new Error("Not a calendar component.");
     calendar = new ICAL.Component(parsed);
     if (calendar.name !== "vcalendar") throw new Error("Not a calendar.");
   } catch {
@@ -206,7 +207,7 @@ export function parseICalendar(
       const details = bareCancellation && !bareCancellation.component.hasProperty("dtstart")
         ? { item: bareCancellation, startDate: occurrence, endDate: undefined }
         : master.getOccurrenceDetails(occurrence);
-      const item = details.item as IEvent;
+      const item = details.item;
       const startZone = propertyZone(item.component.getFirstProperty("dtstart")) ?? baseZone;
       const endZone = propertyZone(item.component.getFirstProperty("dtend")) ?? startZone;
       const fallbackEnd = occurrence.clone();

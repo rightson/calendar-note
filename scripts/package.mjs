@@ -1,6 +1,7 @@
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { bundledLicenses } from './licenses.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const packageRoot = join(root, 'dist', 'calendar-note');
@@ -16,17 +17,7 @@ const optional = ['styles.css'];
 for (const name of optional) {
   if ((await readdir(root)).includes(name)) await copyFile(join(root, name), join(packageRoot, name));
 }
-const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
-const notices = ['Calendar-Note bundled dependency licenses', ''];
-for (const name of Object.keys(packageJson.dependencies).sort()) {
-  const dependencyRoot = join(root, 'node_modules', name);
-  const dependency = JSON.parse(await readFile(join(dependencyRoot, 'package.json'), 'utf8'));
-  const licenseFile = (await readdir(dependencyRoot)).find(file => /^LICEN[CS]E(?:\..*)?$/i.test(file));
-  notices.push(`===== ${name}@${dependency.version} (${dependency.license ?? 'see license text'}) =====`);
-  notices.push(licenseFile ? await readFile(join(dependencyRoot, licenseFile), 'utf8') : 'License text not bundled in npm package.');
-  notices.push('');
-}
-await writeFile(join(packageRoot, 'THIRD_PARTY_LICENSES.txt'), notices.join('\n'));
+await writeFile(join(packageRoot, 'THIRD_PARTY_LICENSES.txt'), await bundledLicenses(root));
 const dist = join(root, 'dist');
 const archive = join(dist, 'calendar-note.zip');
 await rm(archive, { force: true });

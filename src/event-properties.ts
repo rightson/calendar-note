@@ -129,7 +129,7 @@ export class EventPropertiesController {
     const mode = view.getMode();
     const manuallyToggled = this.manualToggle.get(view) === `${view.file.path}\0${mode}`;
     if (manuallyToggled) return;
-    const identity = this.app.metadataCache.getFileCache(view.file)?.frontmatter?.event_id;
+    const identity: unknown = this.app.metadataCache.getFileCache(view.file)?.frontmatter?.event_id;
     const value = panel.querySelector<HTMLElement>('[data-property-key="event_id"] .metadata-property-value');
     const renderedIdentity = value?.textContent?.trim() || value?.querySelector<HTMLInputElement>('input')?.value?.trim();
     if (renderedIdentity !== identity) return;
@@ -145,7 +145,7 @@ export class EventPropertiesController {
 
   private visiblePanel(view: MarkdownView): HTMLElement | undefined {
     const source = view.getMode() === 'source';
-    return [...view.containerEl.querySelectorAll<HTMLElement>('.metadata-container')]
+    return Array.from(view.containerEl.querySelectorAll<HTMLElement>('.metadata-container'))
       .find(element => element.offsetParent !== null && Boolean(element.closest(source ? '.markdown-source-view' : '.markdown-preview-view')));
   }
 

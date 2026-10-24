@@ -6,6 +6,8 @@ import { isEventPropertiesDefault, resolveDailySettings, resolveWeeklySettings }
 import { dailyNotePath, eventNotePath, weeklyNotePath, folderPath } from './paths';
 
 const sample = { id: 'local|sample', sourceId: 'local', uid: 'sample', title: 'Sample event', start: '2026-10-23T09:00:00+08:00', end: '2026-10-23T10:00:00+08:00', allDay: false };
+type TextSettingKey = 'eventPattern' | 'dailyFolder' | 'dailyFormat' | 'dailyTemplate'
+  | 'weeklyFolder' | 'weeklyFormat' | 'weeklyTemplate' | 'locale' | 'timeZone';
 
 export function validatePluginSettings(app: App, settings: PluginSettings): { event: string; daily: string; weekly: string } {
   if (!moment.tz.zone(settings.timeZone)) throw new Error('Enter a valid IANA time zone.');
@@ -39,9 +41,8 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
     const root = this.containerEl;
     root.empty();
     const settings = this.plugin.store.state.settings;
-    root.createEl('h2', { text: 'Calendar-Note settings' });
     root.createEl('p', { text: 'Local events work without a calendar subscription.' });
-    root.createEl('h3', { text: 'Note paths' });
+    new Setting(root).setName('Note paths').setHeading();
     this.text(root, 'Event Note pattern', 'Moment date tokens, {title}, {calendar}, and {uid}.', 'eventPattern');
     root.createEl('p', { text: 'Sample: ' + eventNotePath(sample, 'Local', settings), cls: 'setting-item-description' });
     this.dropdown(root, 'Event Note Properties', 'eventPropertiesDefault', [
@@ -59,7 +60,7 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
     this.text(root, 'Weekly fallback format', 'Moment locale week tokens: gggg and ww. ISO: GGGG and WW.', 'weeklyFormat');
     this.text(root, 'Weekly fallback template', 'Vault-relative Markdown template path, optional.', 'weeklyTemplate');
     root.createEl('p', { text: 'Sample: ' + weeklyNotePath('2026-10-23', this.app, settings), cls: 'setting-item-description' });
-    root.createEl('h3', { text: 'Calendar display' });
+    new Setting(root).setName('Calendar display').setHeading();
     this.dropdown(root, 'Week numbering', 'weekMode', [['calendar', 'Calendar locale'], ['iso', 'ISO 8601']]);
     this.dropdown(root, 'Week starts on', 'weekStart', [
       ['locale', 'Locale default'], ['sunday', 'Sunday'], ['monday', 'Monday'], ['tuesday', 'Tuesday'],
@@ -70,7 +71,7 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
     this.dropdown(root, 'Snap interval', 'snapMinutes', [['5', '5 minutes'], ['10', '10 minutes'], ['15', '15 minutes'], ['20', '20 minutes'], ['30', '30 minutes'], ['60', '60 minutes']]);
     this.number(root, 'Default event duration (minutes)', 'defaultDurationMinutes');
     this.number(root, 'Custom view days', 'customDays');
-    root.createEl('h3', { text: 'Subscriptions' });
+    new Setting(root).setName('Subscriptions').setHeading();
     this.number(root, 'Refresh interval (minutes)', 'syncIntervalMinutes');
     for (const source of settings.sources) this.sourceSetting(root, source);
     new Setting(root).setName('Add subscription').setDesc('A blank URL stays inactive.').addButton(button => button.setButtonText('Add calendar').onClick(async () => {
@@ -78,7 +79,7 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
       next.sources.push({ id: crypto.randomUUID(), name: 'New calendar', url: '', color: '#5885d8', enabled: false });
       await this.save(next);
     }));
-    root.createEl('h3', { text: 'Event Note diagnostics' });
+    new Setting(root).setName('Event Note diagnostics').setHeading();
     if (!this.plugin.notes.diagnostics.length) root.createEl('p', { text: 'No invalid Event Notes found.', cls: 'setting-item-description' });
     else {
       root.createEl('p', { text: 'Fix these files in the Vault, then refresh the calendar.', cls: 'setting-item-description' });
@@ -98,12 +99,12 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
       return false;
     }
   }
-  private text(root: HTMLElement, name: string, description: string, key: keyof PluginSettings): void {
+  private text(root: HTMLElement, name: string, description: string, key: TextSettingKey): void {
     new Setting(root).setName(name).setDesc(description).addText(input => {
-      input.setValue(String(this.plugin.store.state.settings[key]));
+      input.setValue(this.plugin.store.state.settings[key]);
       input.inputEl.addEventListener('blur', () => {
         const value = input.getValue().trim();
-        if (value === String(this.plugin.store.state.settings[key])) return;
+        if (value === this.plugin.store.state.settings[key]) return;
         const next = structuredClone(this.plugin.store.state.settings);
         (next as unknown as Record<string, unknown>)[key] = value;
         void this.save(next);
@@ -140,7 +141,7 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
   }
   private sourceSetting(root: HTMLElement, source: CalendarSource): void {
     const section = root.createDiv({ cls: 'cn-source-settings' });
-    section.createEl('h4', { text: source.name });
+    new Setting(section).setName(source.name).setHeading();
     const update = (patch: Partial<CalendarSource>) => {
       const next = structuredClone(this.plugin.store.state.settings);
       const target = next.sources.find(item => item.id === source.id);

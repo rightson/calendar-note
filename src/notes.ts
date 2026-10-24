@@ -110,7 +110,7 @@ export function eventBullet(event: CalendarEvent, notePath: string, zone: string
   const from = dateAt(event.start, zone);
   const to = dateAt(event.end, zone);
   const time = event.allDay ? 'All day' : `${from.format('HH:mm')}–${to.format('YYYY-MM-DD') === from.format('YYYY-MM-DD') ? to.format('HH:mm') : to.format('YYYY-MM-DD HH:mm')}`;
-  const alias = event.title.replace(/[\[\]|#\r\n]/g, ' ').replace(/\s+/g, ' ').trim() || 'Untitled event';
+  const alias = event.title.replace(/[[\]|#\r\n]/g, ' ').replace(/\s+/g, ' ').trim() || 'Untitled event';
   return `- ${time} [[${notePath.replace(/\.md$/i, '')}|${alias}]]`;
 }
 

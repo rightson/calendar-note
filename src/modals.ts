@@ -71,7 +71,7 @@ export class EventModal extends Modal {
     const actions = root.createDiv({ cls: 'cn-modal-actions' });
     actions.createEl('button', { text: 'Cancel' }).addEventListener('click', () => this.close());
     const save = actions.createEl('button', { text: 'Save event', cls: 'mod-cta' });
-    save.addEventListener('click', async () => {
+    save.addEventListener('click', () => { void (async () => {
       try {
         const title = this.titleValue.trim();
         if (!title) throw new Error('Enter an event title.');
@@ -83,7 +83,7 @@ export class EventModal extends Modal {
         this.errorEl.setText(error instanceof Error ? error.message : 'Could not save the event.');
         save.disabled = false;
       }
-    });
+    })(); });
     if (!this.event) titleInput.focus();
   }
 }
@@ -135,11 +135,11 @@ export class ChangeHistoryModal extends Modal {
     const actions = card.createDiv({ cls: 'cn-history-actions' });
     const action = (label: string, run: () => Promise<void>) => {
       const button = actions.createEl('button', { text: label });
-      button.addEventListener('click', async () => {
+      button.addEventListener('click', () => { void (async () => {
         button.disabled = true;
         try { await run(); this.render(); }
         catch (error) { new Notice(error instanceof Error ? error.message : 'Action failed.'); button.disabled = false; }
-      });
+      })(); });
       return button;
     };
     if (entry.notePath) action('Open note', () => this.actions.openExisting(entry));

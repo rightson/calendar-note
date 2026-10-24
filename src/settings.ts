@@ -41,7 +41,7 @@ export function normalizePluginSettings(raw: unknown, fallback: PluginSettings =
     workdaysOnly: typeof input.workdaysOnly === 'boolean' ? input.workdaysOnly : fallback.workdaysOnly,
     eventPropertiesDefault: isEventPropertiesDefault(input.eventPropertiesDefault)
       ? input.eventPropertiesDefault : fallback.eventPropertiesDefault,
-  } as PluginSettings;
+  };
 }
 
 export function isEventPropertiesDefault(value: unknown): value is EventPropertiesDefault {

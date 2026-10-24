@@ -1,5 +1,7 @@
 # Calendar-Note development and QA
 
+Calendar-Note 0.1.0 targets desktop Obsidian 1.14.5 and later. Desktop-only describes the verified release scope; mobile behavior has not been tested. The native QA below was performed in an isolated Obsidian 1.14.5 Vault. Automated tests cover core logic through adapters and fixtures, so they do not establish every native UI behavior. See the [0.1.0 release notes](../releases/0.1.0.md) for a concise public summary and [releasing](RELEASING.md) for packaging and release steps.
+
 Calendar-Note now has a local Obsidian plugin implementation. The HTML pages under `docs/changes/calendar-note/preview/` remain a separate browser prototype: they use browser storage and fictional sample feeds, and do not inspect or modify a Vault.
 
 ## Build and package

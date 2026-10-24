@@ -4,9 +4,11 @@ import { formatAt, weekInfo } from './date';
 import { resolveDailySettings, resolveWeeklySettings, resolveWeekRules } from './settings';
 
 const reserved = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i;
-const invalid = /[<>:"/\\|?*#^\[\]\u0000-\u001f\u007f]/g;
+// eslint-disable-next-line no-control-regex -- Control characters cannot appear in Vault note names.
+const invalid = /[<>:"/\\|?*#^[\]\u0000-\u001f\u007f]/g;
 
 export function cleanSegment(value: unknown): string {
+  // eslint-disable-next-line @typescript-eslint/no-base-to-string -- Preserve the sanitizer's string coercion for unknown values.
   let text = String(value ?? '').normalize('NFC').replace(invalid, ' ').replace(/\s+/g, ' ').trim().replace(/[. ]+$/g, '');
   if (!text || /^\.+$/.test(text)) text = 'Untitled event';
   if (reserved.test(text)) text = `_${text}`;
@@ -22,9 +24,10 @@ export function cleanSegment(value: unknown): string {
 export function folderPath(folder: string): string {
   if (typeof folder !== 'string') throw new Error('Enter a note folder.');
   if (!folder.trim()) return '';
-  if (/^[\/~]/.test(folder) || /^[a-z]:/i.test(folder) || folder.includes('\\')) throw new Error('Use a relative folder within your Vault.');
+  if (/^[/~]/.test(folder) || /^[a-z]:/i.test(folder) || folder.includes('\\')) throw new Error('Use a relative folder within your Vault.');
   const parts = folder.normalize('NFC').split('/');
   if (parts.some(part => !part.trim() || part.trim() === '.' || part.trim() === '..' ||
+    // eslint-disable-next-line no-control-regex -- Reject control characters in each Vault folder segment.
     /[<>:"|?*\u0000-\u001f\u007f]/.test(part) || /[. ]$/.test(part) || reserved.test(part) ||
     /\{(?:title|calendar|uid)\}/i.test(part) || new TextEncoder().encode(part).length > 255)) {
     throw new Error('The note folder contains an invalid or reserved segment.');
@@ -41,7 +44,7 @@ export function formatNotePath(
 ): string {
   if (typeof pattern !== 'string' || !pattern.trim()) throw new Error('Enter a complete note path pattern.');
   pattern = pattern.trim().replace(/(?:\.md)+$/i, '');
-  if (/^[\/~]/.test(pattern) || /^[a-z]:/i.test(pattern)) throw new Error('Use a relative note path within your Vault.');
+  if (/^[/~]/.test(pattern) || /^[a-z]:/i.test(pattern)) throw new Error('Use a relative note path within your Vault.');
   if (pattern.split('/').some(part => !part.trim() || part.trim() === '.' || part.trim() === '..')) {
     throw new Error('Note paths cannot contain empty or dot segments.');
   }

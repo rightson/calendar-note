@@ -1,0 +1,32 @@
+# Releasing Calendar-Note
+
+This checklist covers a public plugin release. It does not submit the plugin to the Community directory; initial directory submission is a separate step after the release is ready.
+
+## Before release
+
+1. Confirm the version in `manifest.json` and the release tag are identical (`0.1.0` for the initial release).
+2. Review the public README, release notes, license, attribution, privacy disclosures, manifest compatibility fields, and release-code audit.
+3. Run the checks supported by the repository:
+
+   ```sh
+   npm ci
+   npm run typecheck
+   npm test
+   npm run package
+   ```
+
+4. The package build checks that every runtime dependency has a license file and writes the notices into `main.js` and `THIRD_PARTY_LICENSES.txt`. Inspect the generated archive and verify it contains `calendar-note/main.js`, `calendar-note/manifest.json`, `calendar-note/styles.css`, `calendar-note/LICENSE`, and `calendar-note/THIRD_PARTY_LICENSES.txt`.
+5. Compare `manifest.json`, `package.json`, and `versions.json`: the plugin versions must match, and the `versions.json` entry for that version must equal `manifest.json`'s `minAppVersion`. For 0.1.0, these values are `0.1.0` and `1.14.5`.
+6. Verify the release build against the documented native QA scope in [development and QA](DEVELOPMENT.md). Report only checks actually performed; automated tests do not replace native Obsidian checks.
+
+## GitHub release
+
+Create a GitHub Release with tag `0.1.0`, matching `manifest.json`. Attach the three plugin assets as individual files at the release root: `main.js`, `manifest.json`, and `styles.css`. The downloadable ZIP may be attached as an extra convenience, but it does not replace those three assets. Use [the 0.1.0 release notes](../releases/0.1.0.md) as the release description.
+
+The official Obsidian guide requires the release tag to match the manifest version and lists `main.js`, `manifest.json`, and `styles.css` as release attachments: [Submit your plugin](https://docs.obsidian.md/Plugins/Releasing/Submit%20your%20plugin).
+
+## Community directory submission
+
+After the repository and release are ready, sign in at [community.obsidian.md](https://community.obsidian.md), connect the GitHub account that owns the repository, and submit the plugin using the directory's current submission flow. The directory reads `manifest.json` from the default branch and downloads the three release assets from the matching version tag. Community listing and in-app installation remain unavailable until review is complete and the entry is published.
+
+Follow the current [official submission guide](https://docs.obsidian.md/Plugins/Releasing/Submit%20your%20plugin) and [plugin submission requirements](https://docs.obsidian.md/community-directory/submission-requirements-for-plugins). Directory submission is an owner action and is not part of this repository release checklist.

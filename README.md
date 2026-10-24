@@ -1,47 +1,27 @@
 # Calendar-Note
 
-Calendar-Note is an Obsidian calendar plugin for local events, Event Notes, Daily Notes, Weekly Notes, and optional read-only iCal subscriptions. It is available as a local plugin build. The separate HTML preview remains a browser-only design prototype and does not read or write an Obsidian Vault.
+Calendar-Note brings local events and optional read-only iCal calendars into Obsidian. Events link to Markdown Event Notes and the matching Daily Note; a sidebar can also open Weekly Notes. It includes Week, Day, Month, Year, Custom days, and List views.
 
-## Install a local build
+The Community Plugins listing has not been submitted yet. Submission is planned after the 0.1.0 GitHub release; until then, install from the release or build from source.
 
-Use Node.js 22 or newer. From a clone of this repository, run:
+## Install
 
-```sh
-npm ci
-npm run typecheck
-npm test
-npm run build
-npm run package
-```
+For a manual install, download `main.js`, `manifest.json`, and `styles.css` from the [0.1.0 GitHub release](https://github.com/rightson/calendar-note/releases/tag/0.1.0). Create `.obsidian/plugins/calendar-note/` in your Vault, place all three files there, then open **Settings → Community plugins**, enable community plugins if needed, and enable Calendar-Note. Reload Obsidian if prompted.
 
-The distributable is `dist/calendar-note.zip`. Extract its `calendar-note` folder into `<VAULT>/.obsidian/plugins/`, so the resulting plugin folder contains `main.js`, `manifest.json`, `styles.css`, `LICENSE`, and `THIRD_PARTY_LICENSES.txt`. In Obsidian, open **Settings → Community plugins**, enable community plugins if needed, enable **Calendar-Note**, then reload the app if prompted. The plugin ID and folder name are `calendar-note`.
+You can also build the package from source; see [development and QA](docs/manuals/DEVELOPMENT.md).
 
-For an isolated installation, build first and run `npm run install:test-vault -- /absolute/path/to/test-vault`. The destination must already be a directory whose name includes `test`; the script installs only into that explicit Vault. Do not point it at a personal Vault.
+## Use
 
-To uninstall, disable Calendar-Note and remove `<VAULT>/.obsidian/plugins/calendar-note`. Its `data.json` stores settings, source/cache/history, and note-link tracking; `recovery.json` stores any interrupted multi-file transaction. Both are inside the plugin folder and will be removed with it. Event, Daily, and Weekly Markdown files remain in the Vault, including their existing links. Copy `data.json` first if you may want to preserve settings, history, or tracking state. Resolve pending recovery before uninstalling; if it cannot be resolved, keep a copy of `recovery.json` until recovery is handled.
+Open the calendar from the ribbon icon or the command palette. Create a local event from **New event** or an empty calendar slot. The event is saved as a Markdown Event Note and linked under `## Event` in the Daily Note for its start date. Click a date to open its Daily Note; the sidebar's week number opens that Weekly Note.
 
-## Use the plugin
+Subscriptions are optional. Add an HTTPS or `webcal://` feed in settings to display read-only calendar events. Local events work without a subscription. Imported calendar data is cached for use in the calendar, and event changes can be reviewed in History. Removing the plugin or a feed does not delete Vault notes.
 
-Click the Calendar-Note ribbon icon to open the calendar in a new tab. Ctrl/Cmd-click it to open the calendar in a right split beside the active leaf. The same actions are available as **Calendar-Note: Open calendar in new tab** and **Calendar-Note: Open calendar in right split**; assign hotkeys in Obsidian's Hotkeys settings if desired. The toolbar offers Week, Day, Month, Year, Custom days, and List views, a Workdays/All days switch for the main calendar, Today, and New event, Refresh calendars, and History. All days is the default; Workdays shows Monday through Friday in the main calendar while the mini-calendar keeps all seven weekdays and the configured week rules unchanged. Close the expanded sidebar with its × control; when collapsed, a compact icon handle at the left edge restores it without adding a toolbar row. Drag or keyboard-adjust the sidebar separator to resize it; width is saved between launches. The sidebar and main calendar fill the available pane height and stay bottom-aligned. Other commands are **Calendar-Note: New event**, **Calendar-Note: Refresh calendars**, **Calendar-Note: Show change history**, **Calendar-Note: Retry pending recovery**, and **Calendar-Note: Remove duplicate Event Note title**.
+Calendar-Note requires Obsidian 1.14.5 or later and currently supports desktop Obsidian only. Native testing has been performed on Obsidian 1.14.5; mobile behavior has not been verified.
 
-Local events work without subscriptions. Create an event from **New event** or an empty calendar slot; the event-title input has a full-width labeled row, and right-clicking an occupied slot can add overlapping events. Drag either resize edge or move an event to change its time. Local Event Notes are Markdown files with `event_id`, `start`, and `end` frontmatter. The default path pattern is `[Calendar Notes]/{title}`. Event clicks open the linked note and add a managed bullet beneath `## Event` in the Daily Note for its start date. Date controls open that date's Daily Note. The sidebar pairs **Today** with month navigation; its subtly highlighted current-week number remains clickable and opens the Weekly Note. Existing note text and unrelated frontmatter are preserved during managed edits. New fallback Daily Notes and Weekly Notes begin with `## Journal` and `## Weekly review`. A new Event Note omits a title heading when its actual basename matches the original event title; otherwise it includes the original title as an H1. On an active recognized Event Note, **Calendar-Note: Remove duplicate Event Note title** removes a leading H1 only when it exactly matches the note basename, preserving frontmatter and the rest of the body. The command is opt-in; existing notes are never migrated automatically.
+## Privacy and compatibility
 
-The settings tab configures the Event Note path and Properties display, Daily and Weekly fallback folders/formats/templates, week rules, display time zone, snap interval, event duration, custom-days view, and iCal sources. Event Note Properties can Follow Obsidian, open Collapsed (the default), or open Expanded. The choice sets the initial state when a recognized Event Note opens; you can still toggle Properties manually afterward. Calendar chrome uses English abbreviations regardless of note locale; Moment locale and week rules still control date formatting and week identity. Date formats use Moment tokens; Event Note patterns also accept `{title}`, `{calendar}`, and `{uid}`. Daily Notes use the enabled Obsidian Daily Notes settings when available. Weekly settings prefer enabled Periodic Notes weekly settings, then the Calendar community plugin settings, then Calendar-Note fallbacks. Compatible provider settings are detected internally because Obsidian has no public provider API; this may need adjustment if those plugins change their internal setting shape. Template paths are Vault-relative and `{{date}}` / `{{date:FORMAT}}` tokens are expanded.
+No account or telemetry is required. Calendar-Note makes read-only HTTPS requests only to fetch calendar feeds whose URLs you configure. Feed URLs, raw ICS responses, settings, history, link tracking, and recovery data are stored in Obsidian's private plugin data; Event, Daily, and Weekly Notes are written to your Vault. The plugin does not access files outside the Vault and its plugin data folder.
 
-## iCal and change history
+Event Note Properties behavior depends on Obsidian's native editor DOM and is feature-detected; if the property panel is unavailable or hidden, Calendar-Note leaves it alone. Daily and Weekly Note provider settings are detected through internal Obsidian/plugin state because there is no public provider API, so provider updates may require compatibility changes.
 
-Subscriptions are optional HTTPS or `webcal://` URLs. Calendar-Note fetches feeds through Obsidian's request API and never writes to the upstream calendar. It parses recurrence, exceptions, cancellations, time zones, and all-day events for the visible range. Failed refreshes retain cached events and use retry backoff. Subscription URLs, feed payloads, and authorization headers are private settings/cache data; history records change details without storing URLs or ICS payloads.
-
-Imported event identity is source plus UID, with the original recurrence ID for recurring instances. Rescheduling an imported event creates a local time override. A later source change keeps that effective local time and is recorded in History. **Use latest source times** clears only the time override and applies the accepted feed interval. History supports All and Needs review filters, opening linked notes, acknowledging a row, and retrying eligible failed note updates. A newer source revision supersedes pending retry work. If a write cannot safely update the tracked note or journal bullet, the change needs attention rather than guessing. The plugin keeps a recovery journal for interrupted multi-file edits; calendar edits pause until recovery succeeds.
-
-Removing or disabling the plugin does not automatically delete Vault notes. A cancelled or removed feed event also does not delete its Event Note or Daily Note entry.
-
-## Verification status
-
-The plugin was loaded in an isolated Obsidian 1.14.5 Vault. Native checks covered local Event Note and Daily Note creation, cross-day rescheduling with custom YAML/body preserved, imported-source changes and recovery/retry, local override resolution, Weekly Note editing, and a live HTTPS ICS fetch. Obsidian file-manager renames with automatic link updates both enabled and declined preserved stable event identity and produced exactly one correct Daily Note bullet; a reload preserved review/resolution history and Weekly Note text. UI checks confirmed full-height bottom-aligned calendar/sidebar content, centered single-line English date labels without duplicate headers after mode changes, pointer and keyboard sidebar resizing with saved width, Workdays persistence with a seven-day mini-calendar, and the focused full-width event-title field. The final compact sidebar controls passed: × closes the expanded sidebar, and an icon-only left-edge handle restores it at the saved width without a toolbar control. Narrow-window behavior, native event drag/resize, and some provider and deep-view checks remain under verification. See [development and QA](docs/manuals/DEVELOPMENT.md) for the tested cases and limits.
-
-## HTML prototype
-
-The pages in `docs/changes/calendar-note/preview/` are a separate interactive browser prototype. Serve the repository root with `python3 -m http.server 4318` and open `http://127.0.0.1:4318/docs/changes/calendar-note/preview/index.html`. Its sample subscriptions and simulated source changes use browser storage only; they are not the live plugin.
-
-See [development and QA](docs/manuals/DEVELOPMENT.md) for build steps, controlled feed fixture checks, recovery scenarios, and the boundary between automated tests and native Obsidian verification. The proposal remains a draft under `docs/changes/calendar-note/`.
+See [0.1.0 release notes](docs/releases/0.1.0.md) for this release's verified scope and known QA limits. See [development and QA](docs/manuals/DEVELOPMENT.md) for build instructions, test coverage, and native test details. Calendar-Note is licensed under [MIT](LICENSE). Third-party dependency license text is embedded in the release `main.js` and included as `THIRD_PARTY_LICENSES.txt` in the package ZIP.

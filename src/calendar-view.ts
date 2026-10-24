@@ -405,8 +405,8 @@ export class CalendarNoteView extends ItemView {
   private renderListDates(type: string, start: Date, end: Date): void {
     if (!this.listDatesEl) return;
     this.listDatesEl.empty();
-    if (type !== 'listWeek') { this.listDatesEl.style.display = 'none'; return; }
-    this.listDatesEl.style.display = '';
+    this.listDatesEl.classList.toggle('is-hidden', type !== 'listWeek');
+    if (type !== 'listWeek') return;
     const row = this.listDatesEl.createDiv({ cls: 'cn-list-date-buttons' });
     const weekStart = dateAt(start, this.settings.timeZone).format('YYYY-MM-DD');
     this.weekButton(row, weekStart, `Week ${weekInfo(weekStart, resolveWeekRules(this.app, this.settings), this.settings.timeZone).number}`);
@@ -513,11 +513,11 @@ export class CalendarNoteView extends ItemView {
     catch (error) { arg.revert(); new Notice(error instanceof Error ? error.message : 'Could not reschedule event.'); }
   }
   private pointerInterval(x: number, y: number, fallback?: CalendarEvent): Interval {
-    const grid = this.containerEl.querySelector('.cn-calendar');
-    const columns = [...(grid?.querySelectorAll<HTMLElement>('.fc-timegrid-col[data-date]') ?? [])];
+    const grid = this.containerEl.querySelector<HTMLElement>('.cn-calendar');
+    const columns = Array.from(grid?.querySelectorAll<HTMLElement>('.fc-timegrid-col[data-date]') ?? []);
     const column = columns.find(el => { const r = el.getBoundingClientRect(); return x >= r.left && x < r.right; });
     const day = column?.dataset.date ?? (fallback ? dateAt(fallback.start, this.settings.timeZone).format('YYYY-MM-DD') : this.selectedDay ?? this.today());
-    const slots = [...(grid?.querySelectorAll<HTMLElement>('.fc-timegrid-slot[data-time]') ?? [])];
+    const slots = Array.from(grid?.querySelectorAll<HTMLElement>('.fc-timegrid-slot[data-time]') ?? []);
     const slot = slots.find(el => { const r = el.getBoundingClientRect(); return y >= r.top && y < r.bottom; });
     const time = slot?.dataset.time?.slice(0, 5) ?? (fallback ? dateAt(fallback.start, this.settings.timeZone).format('HH:mm') : '09:00');
     const start = moment.tz(`${day}T${time}:00`, 'YYYY-MM-DDTHH:mm:ss', true, this.settings.timeZone).toISOString();
