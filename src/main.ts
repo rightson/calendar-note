@@ -11,6 +11,7 @@ import { createObsidianStoreIO } from './vault-adapter';
 import { EventNoteService } from './events';
 import { SubscriptionService } from './subscriptions';
 import { SourceSyncService } from './sync';
+import { SettingsUpdateQueue } from './subscription-settings';
 import { historyForReview, type ChangeHistoryEntry } from './history';
 import type { CalendarEvent, Interval, PluginSettings } from './types';
 import type { CalendarRange } from './ical';
@@ -32,10 +33,13 @@ export default class CalendarNotePlugin extends Plugin {
   private lastDiagnostics = '';
   private restoreRenameFile?: () => void;
   private eventProperties?: EventPropertiesController;
+  private settingTab?: CalendarNoteSettingTab;
+  private settingsUpdates!: SettingsUpdateQueue;
 
   async onload(): Promise<void> {
     const state = normalizeState(await this.loadData(), DEFAULT_SETTINGS);
     this.store = new CalendarStore(createObsidianStoreIO(this.app, this), state);
+    this.settingsUpdates = new SettingsUpdateQueue(() => this.store.state.settings, settings => this.persistSettings(settings));
     try { await this.store.recover(); }
     catch {
       this.store.recoveryConflict ??= new RecoveryConflict(['transaction journal']);
@@ -72,7 +76,8 @@ export default class CalendarNotePlugin extends Plugin {
     this.addCommand({ id: 'refresh', name: 'Refresh calendars', callback: () => void this.refresh(true) });
     this.addCommand({ id: 'change-history', name: 'Show change history', callback: () => this.showHistory() });
     this.addCommand({ id: 'retry-recovery', name: 'Retry pending recovery', callback: () => void this.retryRecovery() });
-    this.addSettingTab(new CalendarNoteSettingTab(this.app, this));
+    this.settingTab = new CalendarNoteSettingTab(this.app, this);
+    this.addSettingTab(this.settingTab);
     const changed = (file: TFile) => { if (file.extension === 'md') this.scheduleScan(); };
     this.registerEvent(this.app.vault.on('create', file => { if (file instanceof TFile) changed(file); }));
     this.registerEvent(this.app.vault.on('modify', file => { if (file instanceof TFile) changed(file); }));
@@ -121,7 +126,11 @@ export default class CalendarNotePlugin extends Plugin {
     return this.app.workspace.getLeavesOfType(CALENDAR_VIEW_TYPE)
       .map(leaf => leaf.view).filter((view): view is CalendarNoteView => view instanceof CalendarNoteView);
   }
-  private refreshViews(): void { for (const view of this.getViews()) view.refresh(); }
+  private refreshViews(): void {
+    for (const view of this.getViews()) view.refresh();
+    this.settingTab?.refreshSubscriptionStatus();
+  }
+  getVisibleRange(): CalendarRange | undefined { return this.range; }
   private updateEventsFromCache(): void {
     const local = this.events.filter(event => event.sourceId === 'local');
     const imports = this.subscriptions?.getEvents(this.range);
@@ -211,7 +220,15 @@ export default class CalendarNotePlugin extends Plugin {
     this.scheduleScan();
   }
 
-  async saveSettings(settings: PluginSettings): Promise<void> {
+  updateSettings(change: (settings: PluginSettings) => void, validate?: (settings: PluginSettings) => void): Promise<void> {
+    return this.settingsUpdates.update(change, validate);
+  }
+
+  saveSettings(settings: PluginSettings): Promise<void> {
+    return this.updateSettings(next => { Object.assign(next, settings); });
+  }
+
+  private async persistSettings(settings: PluginSettings): Promise<void> {
     const previousPropertiesDefault = this.store.state.settings.eventPropertiesDefault;
     await this.store.commit([], state => { state.settings = settings; });
     if (settings.eventPropertiesDefault !== previousPropertiesDefault) this.eventProperties?.settingsChanged();

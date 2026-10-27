@@ -84,15 +84,23 @@ function intervalFor(
   endZone: string | undefined,
   displayZone: string,
   embedded: Set<string>,
+  explicitEnd: boolean,
 ): Pick<CalendarEvent, "start" | "end" | "allDay"> {
   const from = timeToMillis(start, startZone, displayZone, embedded);
   const to = timeToMillis(end, endZone ?? startZone, displayZone, embedded);
-  if (!(to > from)) throw new ICalError("parse", "Event end must be after start.");
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to < from || (to === from && (start.isDate || explicitEnd))) {
+    throw new ICalError("parse", "Event end must be after start.");
+  }
   return { start: isoAt(from, displayZone), end: isoAt(to, displayZone), allDay: start.isDate };
 }
 
-function intersects(event: CalendarEvent, range: CalendarRange): boolean {
-  return Date.parse(event.start) < Date.parse(range.end) && Date.parse(event.end) > Date.parse(range.start);
+/** A timed point event belongs to the range containing its instant. */
+export function intersectsRange(event: Pick<CalendarEvent, "start" | "end">, range: CalendarRange): boolean {
+  const start = Date.parse(event.start);
+  const end = Date.parse(event.end);
+  const rangeStart = Date.parse(range.start);
+  return start < Date.parse(range.end)
+    && (end > rangeStart || (end === start && start >= rangeStart));
 }
 
 function eventFields(event: IEvent, sourceId: string, recurrenceId: string | undefined,
@@ -134,7 +142,9 @@ export function parseICalendar(
   }
   let calendar: InstanceType<typeof ICAL.Component>;
   try {
-    const parsed: unknown = ICAL.parse(raw);
+    // Some exported UTF-8 .ics files include a BOM, which ical.js treats as
+    // text before BEGIN:VCALENDAR. Keep the cached response unchanged.
+    const parsed: unknown = ICAL.parse(raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw);
     if (!Array.isArray(parsed)) throw new Error("Not a calendar component.");
     calendar = new ICAL.Component(parsed);
     if (calendar.name !== "vcalendar") throw new Error("Not a calendar.");
@@ -178,6 +188,8 @@ export function parseICalendar(
     if (!master.component.hasProperty("dtstart")) throw new ICalError("parse", "VEVENT lacks DTSTART.");
     const baseZone = propertyZone(master.component.getFirstProperty("dtstart"));
     const baseEndZone = propertyZone(master.component.getFirstProperty("dtend")) ?? baseZone;
+    const baseFields = intervalFor(master.startDate, master.endDate, baseZone, baseEndZone, displayZone, embedded,
+      master.component.hasProperty("dtend"));
     const exceptionAnchors = new Set<string>();
     const exceptionByAnchor = new Map<string, IEvent>();
     for (const component of group.exceptions) {
@@ -189,9 +201,8 @@ export function parseICalendar(
       exceptionByAnchor.set(rec, exception);
     }
     if (!master.isRecurring() && group.exceptions.length === 0) {
-      const fields = intervalFor(master.startDate, master.endDate, baseZone, baseEndZone, displayZone, embedded);
-      const event = eventFields(master, sourceId, undefined, fields);
-      if (intersects(event, range) || trackedIds.has(event.id)) result.set(event.id, event);
+      const event = eventFields(master, sourceId, undefined, baseFields);
+      if (intersectsRange(event, range) || trackedIds.has(event.id)) result.set(event.id, event);
       continue;
     }
 
@@ -210,13 +221,16 @@ export function parseICalendar(
       const item = details.item;
       const startZone = propertyZone(item.component.getFirstProperty("dtstart")) ?? baseZone;
       const endZone = propertyZone(item.component.getFirstProperty("dtend")) ?? startZone;
-      const fallbackEnd = occurrence.clone();
-      fallbackEnd.addDuration(master.duration);
-      const fields = intervalFor(details.startDate ?? occurrence, details.endDate ?? fallbackEnd,
-        startZone, endZone, displayZone, embedded);
+      const eventStart = details.startDate ?? occurrence;
+      const inheritedEnd = eventStart.clone();
+      inheritedEnd.addDuration(master.duration);
+      const eventEnd = !item.component.hasProperty("dtend") && !item.component.hasProperty("duration")
+        ? inheritedEnd : details.endDate ?? inheritedEnd;
+      const fields = intervalFor(eventStart, eventEnd, startZone, endZone, displayZone, embedded,
+        item.component.hasProperty("dtend"));
       const event = eventFields(item, sourceId, recurrenceId, fields, master);
       const anchorMs = timeToMillis(occurrence, baseZone, displayZone, embedded);
-      if (intersects(event, range) || trackedIds.has(id) || (anchorMs >= from && anchorMs < to)) result.set(id, event);
+      if (intersectsRange(event, range) || trackedIds.has(id) || (anchorMs >= from && anchorMs < to)) result.set(id, event);
       // Exception anchors can lie beyond the visible range; they are handled below.
       if (anchorMs > cutoff && count > 1) break;
     }
@@ -226,19 +240,21 @@ export function parseICalendar(
       const recProp = exceptionComponent.getFirstProperty("recurrence-id");
       const recurrenceId = anchor(exception.recurrenceId, propertyZone(recProp) ?? baseZone, displayZone, embedded);
       const id = sourceEventId(sourceId, uid, recurrenceId);
-      const fallbackEnd = exception.recurrenceId.clone();
-      fallbackEnd.addDuration(master.duration);
+      const eventStart = exceptionComponent.hasProperty("dtstart") ? exception.startDate : exception.recurrenceId;
+      const inheritedEnd = eventStart.clone();
+      inheritedEnd.addDuration(master.duration);
+      const eventEnd = exceptionComponent.hasProperty("dtend") || exceptionComponent.hasProperty("duration")
+        ? exception.endDate : inheritedEnd;
       const fields = intervalFor(
-        exceptionComponent.hasProperty("dtstart") ? exception.startDate : exception.recurrenceId,
-        exceptionComponent.hasProperty("dtstart") ? exception.endDate : fallbackEnd,
+        eventStart, eventEnd,
         propertyZone(exceptionComponent.getFirstProperty("dtstart")) ?? baseZone,
         propertyZone(exceptionComponent.getFirstProperty("dtend")) ?? baseEndZone,
-        displayZone, embedded,
+        displayZone, embedded, exceptionComponent.hasProperty("dtend"),
       );
       const event = eventFields(exception, sourceId, recurrenceId, fields, master);
       const anchorMs = timeToMillis(exception.recurrenceId,
         propertyZone(recProp) ?? baseZone, displayZone, embedded);
-      if (intersects(event, range) || trackedIds.has(id) || (anchorMs >= from && anchorMs < to)) result.set(id, event);
+      if (intersectsRange(event, range) || trackedIds.has(id) || (anchorMs >= from && anchorMs < to)) result.set(id, event);
     }
   }
   return [...result.values()].sort((a, b) => Date.parse(a.start) - Date.parse(b.start) || a.id.localeCompare(b.id));

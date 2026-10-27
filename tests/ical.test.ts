@@ -119,6 +119,95 @@ END:VEVENT`);
   assert.equal(events[0].start, "2026-03-07T09:00:00+08:00");
 });
 
+test("timed events without an end keep zero duration and obey half-open range boundaries", () => {
+  const raw = feed(`BEGIN:VEVENT
+UID:point-start
+DTSTAMP:20260301T000000Z
+DTSTART:20260307T000000Z
+SUMMARY:Point at start
+END:VEVENT
+BEGIN:VEVENT
+UID:point-end
+DTSTAMP:20260301T000000Z
+DTSTART:20260315T000000Z
+SUMMARY:Point at end
+END:VEVENT
+BEGIN:VEVENT
+UID:normal
+DTSTAMP:20260301T000000Z
+DTSTART:20260310T120000Z
+DTEND:20260310T130000Z
+SUMMARY:Normal
+END:VEVENT`);
+  const events = parseICalendar(raw, "x", range, "UTC");
+  assert.deepEqual(events.map(event => event.uid), ["point-start", "normal"]);
+  assert.equal(events[0].start, events[0].end);
+  const tracked = parseICalendar(raw, "x", range, "UTC", new Set([sourceEventId("x", "point-end")]));
+  assert.equal(tracked.find(event => event.uid === "point-end")?.start, "2026-03-15T00:00:00+00:00");
+});
+
+test("zero-duration recurrence and moved exception keep original anchors; other exceptions inherit master duration", () => {
+  const raw = feed(`BEGIN:VEVENT
+UID:points
+DTSTAMP:20260301T000000Z
+DTSTART:20260307T090000Z
+RRULE:FREQ=DAILY;COUNT=2
+END:VEVENT
+BEGIN:VEVENT
+UID:points
+DTSTAMP:20260301T000000Z
+RECURRENCE-ID:20260308T090000Z
+DTSTART:20260309T120000Z
+END:VEVENT
+BEGIN:VEVENT
+UID:hourly
+DTSTAMP:20260301T000000Z
+DTSTART:20260307T140000Z
+DTEND:20260307T150000Z
+RRULE:FREQ=DAILY;COUNT=2
+END:VEVENT
+BEGIN:VEVENT
+UID:hourly
+DTSTAMP:20260301T000000Z
+RECURRENCE-ID:20260308T140000Z
+DTSTART:20260309T160000Z
+END:VEVENT`);
+  const events = parseICalendar(raw, "x", range, "UTC");
+  const movedPoint = events.find(event => event.uid === "points" && event.recurrenceId === "2026-03-08T09:00:00.000Z");
+  assert.equal(movedPoint?.start, "2026-03-09T12:00:00+00:00");
+  assert.equal(movedPoint?.end, movedPoint?.start);
+  const movedHour = events.find(event => event.uid === "hourly" && event.recurrenceId === "2026-03-08T14:00:00.000Z");
+  assert.equal(movedHour?.start, "2026-03-09T16:00:00+00:00");
+  assert.equal(movedHour?.end, "2026-03-09T17:00:00+00:00");
+});
+
+test("UTF-8 BOM is accepted without changing ordinary LF or CRLF parsing", () => {
+  const raw = feed(`BEGIN:VEVENT
+UID:bom
+DTSTAMP:20260301T000000Z
+DTSTART:20260310T120000Z
+DTEND:20260310T130000Z
+END:VEVENT`);
+  assert.equal(parseICalendar(`\uFEFF${raw}`, "x", range, "UTC").length, 1);
+  assert.equal(parseICalendar(raw.replace(/\r\n/g, "\n"), "x", range, "UTC").length, 1);
+});
+
+test("explicit equal or reversed ends and zero-length all-day spans remain invalid", () => {
+  for (const [start, end] of [
+    ["DTSTART:20260310T120000Z", "DTEND:20260310T120000Z"],
+    ["DTSTART:20260310T120000Z", "DTEND:20260310T110000Z"],
+    ["DTSTART;VALUE=DATE:20260310", "DTEND;VALUE=DATE:20260310"],
+  ]) {
+    const raw = feed(`BEGIN:VEVENT
+UID:invalid-span
+DTSTAMP:20260301T000000Z
+${start}
+${end}
+END:VEVENT`);
+    assert.throws(() => parseICalendar(raw, "x", range, "UTC"), ICalError);
+  }
+});
+
 test("invalid or ambiguous feeds and unknown zones fail explicitly", () => {
   assert.throws(() => parseICalendar("<html>bad</html>", "x", range, "Asia/Taipei"), ICalError);
   assert.throws(() => parseICalendar(feed(`BEGIN:VEVENT

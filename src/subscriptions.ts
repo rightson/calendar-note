@@ -1,4 +1,4 @@
-import { ICalError, ICalParser, type CalendarRange } from "./ical";
+import { ICalError, ICalParser, intersectsRange, type CalendarRange } from "./ical";
 import { emptySourceCache, safeSourceError, type SourceCache } from "./history";
 import type { CalendarSource, CalendarEvent } from "./types";
 import type { CalendarStore } from "./store";
@@ -113,7 +113,7 @@ export class SubscriptionService {
       .flatMap(cache => Object.values(cache.accepted ?? {}).map(item => item.event))
       .filter(event => shown.has(event.sourceId))
       .map(event => this.sync.effectiveEvent(event))
-      .filter(event => Date.parse(event.start) < Date.parse(range.end) && Date.parse(event.end) > Date.parse(range.start))
+      .filter(event => intersectsRange(event, range))
       .sort((a, b) => Date.parse(a.start) - Date.parse(b.start) || a.id.localeCompare(b.id));
   }
 

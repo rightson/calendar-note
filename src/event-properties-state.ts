@@ -1,9 +1,14 @@
-import { validateInterval } from './notes';
+import { isImportedEventIdentity, validateInterval, validateSourceInterval } from './notes';
 
 export function isEventNoteFrontmatter(frontmatter: Record<string, unknown> | undefined): boolean {
   if (typeof frontmatter?.event_id !== 'string' || !frontmatter.event_id.trim()
     || typeof frontmatter.start !== 'string' || typeof frontmatter.end !== 'string') return false;
-  try { validateInterval(frontmatter.start, frontmatter.end, frontmatter.all_day === true); }
+  try {
+    const imported = isImportedEventIdentity(frontmatter.event_id,
+      typeof frontmatter.source === 'string' ? frontmatter.source : undefined,
+      typeof frontmatter.ical_uid === 'string' ? frontmatter.ical_uid : undefined);
+    (imported ? validateSourceInterval : validateInterval)(frontmatter.start, frontmatter.end, frontmatter.all_day === true);
+  }
   catch { return false; }
   return true;
 }

@@ -1,5 +1,5 @@
 import type { CalendarEvent, CalendarSource } from "./types";
-import type { CalendarRange } from "./ical";
+import { intersectsRange, type CalendarRange } from "./ical";
 import type { CalendarStore } from "./store";
 import type { EventNoteService } from "./events";
 import type { StoredState } from "./state";
@@ -17,8 +17,6 @@ const sameSpan = (a: CalendarEvent, b: CalendarEvent): boolean => {
     ? a.start.slice(0, 10) === b.start.slice(0, 10) && a.end.slice(0, 10) === b.end.slice(0, 10)
     : Date.parse(a.start) === Date.parse(b.start) && Date.parse(a.end) === Date.parse(b.end);
 };
-const intersects = (event: CalendarEvent, range: CalendarRange): boolean =>
-  Date.parse(event.start) < Date.parse(range.end) && Date.parse(event.end) > Date.parse(range.start);
 const nextId = (): string => globalThis.crypto.randomUUID();
 
 class StaleSourcePlan extends Error {}
@@ -72,7 +70,7 @@ export class SourceSyncService {
     // A missing tracked event inside this range needs review. An event merely
     // outside the range retains its accepted baseline.
     for (const [id, accepted] of Object.entries(old.accepted)) {
-      if (!incoming.has(id) && intersects(accepted.event, range)) {
+      if (!incoming.has(id) && intersectsRange(accepted.event, range)) {
         incoming.set(id, { ...accepted.event, status: "removed" });
       }
     }

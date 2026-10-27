@@ -14,6 +14,7 @@ import type CalendarNotePlugin from './main';
 import { EventModal } from './modals';
 import { visibleMonthCount } from './calendar-layout';
 import { sidebarWidthForContainer, resizeSidebarWithKeyboard } from './sidebar-layout';
+import { subscriptionFailureMessage } from './subscription-settings';
 
 export const CALENDAR_VIEW_TYPE = 'calendar-note-calendar';
 export const CALENDAR_VIEWS = [
@@ -37,6 +38,7 @@ export class CalendarNoteView extends ItemView {
   private periodEl?: HTMLElement;
   private viewWeekEl?: HTMLButtonElement;
   private historyEl?: HTMLButtonElement;
+  private subscriptionFailureEl?: HTMLElement;
   private listDatesEl?: HTMLElement;
   private selectedDay?: string;
   private miniMonth?: string;
@@ -129,6 +131,7 @@ export class CalendarNoteView extends ItemView {
     this.button(controls, 'New event', () => this.newEvent());
     this.button(controls, 'Refresh', () => void this.plugin.refresh(true));
     this.historyEl = this.button(controls, 'History', () => this.plugin.showHistory());
+    this.subscriptionFailureEl = content.createDiv({ cls: 'cn-subscription-failure', attr: { role: 'status', 'aria-live': 'polite' } });
     this.listDatesEl = content.createDiv({ cls: 'cn-list-dates' });
     const grid = content.createDiv({ cls: 'cn-calendar' });
     const rules = resolveWeekRules(this.app, this.settings);
@@ -244,6 +247,7 @@ export class CalendarNoteView extends ItemView {
     this.calendar.render();
     this.applySidebarLayout();
     this.updateDisplayControls();
+    this.updateSubscriptionFailure();
     this.renderMini();
   }
 
@@ -455,13 +459,23 @@ export class CalendarNoteView extends ItemView {
   }
   private eventInputs(): EventInput[] {
     return this.plugin.events.filter(event => event.status !== 'cancelled' && event.status !== 'removed').map(event => ({
-      id: event.id, title: event.title, start: event.start, end: event.end, allDay: event.allDay,
+      id: event.id, title: event.title, start: event.start,
+      ...(!event.allDay && Date.parse(event.start) === Date.parse(event.end) ? {} : { end: event.end }),
+      allDay: event.allDay,
       backgroundColor: this.settings.sources.find(source => source.id === event.sourceId)?.color ?? undefined,
     }));
+  }
+  private updateSubscriptionFailure(): void {
+    if (!this.subscriptionFailureEl) return;
+    const message = subscriptionFailureMessage(this.settings, this.plugin.store.state.sourceCaches);
+    this.subscriptionFailureEl.hidden = !message;
+    this.subscriptionFailureEl.setText(message ?? '');
+    this.subscriptionFailureEl.title = message ?? '';
   }
   refresh(): void {
     if (!this.calendar) return;
     this.historyEl?.setText(this.plugin.reviewCount ? `History (${this.plugin.reviewCount})` : 'History');
+    this.updateSubscriptionFailure();
     this.calendar.refetchEvents();
     this.renderMini();
   }
