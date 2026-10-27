@@ -2,13 +2,13 @@
 
 Calendar-Note brings local events and optional read-only iCal calendars into Obsidian. Events link to Markdown Event Notes and the matching Daily Note; a sidebar can also open Weekly Notes. It includes Week, Day, Month, Year, Custom days, and List views.
 
-The Community Plugins listing has not been submitted yet. Submission is planned after the 0.1.0 GitHub release; until then, install from the release or build from source.
-
 ## Install
 
-For a manual install, download `main.js`, `manifest.json`, and `styles.css` from the [0.1.0 GitHub release](https://github.com/rightson/calendar-note/releases/tag/0.1.0). Create `.obsidian/plugins/calendar-note/` in your Vault, place all three files there, then open **Settings → Community plugins**, enable community plugins if needed, and enable Calendar-Note. Reload Obsidian if prompted.
+Calendar-Note requires **Obsidian 1.14.5 or later** and supports desktop Obsidian. The plugin has not been submitted to the Community Plugins directory, so it is not available through Obsidian's built-in plugin browser yet.
 
-You can also build the package from source; see [development and QA](docs/manuals/DEVELOPMENT.md).
+- **Download and install:** [Download the latest ZIP](https://github.com/rightson/calendar-note/releases/latest/download/calendar-note.zip) and follow the [manual installation guide](docs/manuals/INSTALLATION.md).
+- **Install with BRAT:** Install BRAT from Community Plugins, then add `rightson/calendar-note` as a beta plugin. See the [BRAT installation guide](docs/manuals/INSTALLATION.md#install-with-brat).
+- [View all GitHub releases](https://github.com/rightson/calendar-note/releases).
 
 ## Use
 
@@ -16,12 +16,10 @@ Open the calendar from the ribbon icon or the command palette. Create a local ev
 
 Subscriptions are optional. Add an HTTPS or `webcal://` feed in settings to display read-only calendar events. Local events work without a subscription. Imported calendar data is cached for use in the calendar, and event changes can be reviewed in History. Removing the plugin or a feed does not delete Vault notes.
 
-Calendar-Note requires Obsidian 1.14.5 or later and currently supports desktop Obsidian only. Native testing has been performed on Obsidian 1.14.5; mobile behavior has not been verified.
-
 ## Privacy and compatibility
 
 No account or telemetry is required. Calendar-Note makes read-only HTTPS requests only to fetch calendar feeds whose URLs you configure. Feed URLs, raw ICS responses, settings, history, link tracking, and recovery data are stored in Obsidian's private plugin data; Event, Daily, and Weekly Notes are written to your Vault. The plugin does not access files outside the Vault and its plugin data folder.
 
 Event Note Properties behavior depends on Obsidian's native editor DOM and is feature-detected; if the property panel is unavailable or hidden, Calendar-Note leaves it alone. Daily and Weekly Note provider settings are detected through internal Obsidian/plugin state because there is no public provider API, so provider updates may require compatibility changes.
 
-See [0.1.0 release notes](docs/releases/0.1.0.md) for this release's verified scope and known QA limits. See [development and QA](docs/manuals/DEVELOPMENT.md) for build instructions, test coverage, and native test details. Calendar-Note is licensed under [MIT](LICENSE). Third-party dependency license text is embedded in the release `main.js` and included as `THIRD_PARTY_LICENSES.txt` in the package ZIP.
+See [0.1.0 release notes](docs/releases/0.1.0.md) for the verified scope and known QA limits, [installation guide](docs/manuals/INSTALLATION.md) for setup and updates, and [development and QA](docs/manuals/DEVELOPMENT.md) for build instructions and test coverage. Calendar-Note is licensed under [MIT](LICENSE). Third-party dependency license text is embedded in the release `main.js` and included as `THIRD_PARTY_LICENSES.txt` in the package ZIP.
