@@ -53,7 +53,7 @@ export class CalendarNoteView extends ItemView {
 
   constructor(leaf: WorkspaceLeaf, public readonly plugin: CalendarNotePlugin) { super(leaf); }
   getViewType(): string { return CALENDAR_VIEW_TYPE; }
-  getDisplayText(): string { return 'Calendar-Note'; }
+  getDisplayText(): string { return 'Calendar Note'; }
   getIcon(): string { return 'calendar-days'; }
 
   async onOpen(): Promise<void> {

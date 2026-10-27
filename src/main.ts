@@ -43,7 +43,7 @@ export default class CalendarNotePlugin extends Plugin {
     try { await this.store.recover(); }
     catch {
       this.store.recoveryConflict ??= new RecoveryConflict(['transaction journal']);
-      new Notice('Calendar-Note recovery needs attention. Open the calendar and choose Retry recovery.');
+      new Notice('Calendar Note recovery needs attention. Open the calendar and choose Retry recovery.');
     }
     this.notes = new EventNoteService(this.app, this.store, () => this.store.state.settings);
     this.eventProperties = new EventPropertiesController(
@@ -59,7 +59,7 @@ export default class CalendarNotePlugin extends Plugin {
     });
     this.store.onChange = () => { this.updateEventsFromCache(); this.refreshViews(); };
     this.registerView(CALENDAR_VIEW_TYPE, leaf => new CalendarNoteView(leaf, this));
-    this.addRibbonIcon('calendar-days', 'Open Calendar-Note', evt => void this.openCalendar(calendarOpenModeForClick(evt)));
+    this.addRibbonIcon('calendar-days', 'Open Calendar Note', evt => void this.openCalendar(calendarOpenModeForClick(evt)));
     this.addCommand({ id: 'open-calendar', name: 'Open calendar in new tab', callback: () => void this.openCalendar('tab') });
     this.addCommand({ id: 'open-calendar-right', name: 'Open calendar in right split', callback: () => void this.openCalendar('right-split') });
     this.addCommand({ id: 'new-event', name: 'New event', callback: () => void this.openCalendar().then(view => view.newEvent()) });
@@ -188,7 +188,7 @@ export default class CalendarNotePlugin extends Plugin {
         this.updateEventsFromCache();
         this.refreshViews();
         const diagnostic = this.notes.diagnostics.join('\n');
-        if (diagnostic && diagnostic !== this.lastDiagnostics) new Notice('Calendar-Note found an invalid Event Note. Open its settings for the affected path.', 7000);
+        if (diagnostic && diagnostic !== this.lastDiagnostics) new Notice('Calendar Note found an invalid Event Note. Open its settings for the affected path.', 7000);
         this.lastDiagnostics = diagnostic;
       } while (this.scanAgain && !this.disposed);
     } catch (error) { new Notice(error instanceof Error ? error.message : 'Could not scan Event Notes.'); }
@@ -200,7 +200,7 @@ export default class CalendarNotePlugin extends Plugin {
       if (this.store.recoveryConflict) { this.showRecovery(); throw new Error('Resolve pending recovery before editing notes.'); }
       return await action();
     } catch (error) {
-      new Notice(error instanceof Error ? error.message : 'Calendar-Note action failed.');
+      new Notice(error instanceof Error ? error.message : 'Calendar Note action failed.');
       return undefined;
     }
   }
@@ -273,7 +273,7 @@ export default class CalendarNotePlugin extends Plugin {
     const conflict = this.store.recoveryConflict;
     if (!conflict) return;
     const modal = new Modal(this.app);
-    modal.titleEl.setText('Calendar-Note recovery needs attention');
+    modal.titleEl.setText('Calendar Note recovery needs attention');
     modal.contentEl.createEl('p', { text: 'These files changed during a pending transaction. Review them, then retry recovery. Calendar edits are paused until recovery succeeds.' });
     const list = modal.contentEl.createEl('ul');
     for (const path of conflict.paths) list.createEl('li', { text: path });
@@ -285,7 +285,7 @@ export default class CalendarNotePlugin extends Plugin {
     try {
       await this.store.recover();
       this.store.recoveryConflict = null;
-      new Notice('Calendar-Note recovery completed.');
+      new Notice('Calendar Note recovery completed.');
       await this.rescan();
       if (this.range) await this.refresh(false);
     } catch { this.showRecovery(); }
