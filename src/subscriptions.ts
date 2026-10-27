@@ -1,5 +1,6 @@
 import { ICalError, ICalParser, intersectsRange, type CalendarRange } from "./ical";
-import { emptySourceCache, safeSourceError, type SourceCache } from "./history";
+import { emptySourceCache, safeSourceError, safeStoredSourceError, type SourceCache, type SourceErrorKind } from "./history";
+import type { ICalErrorCode } from "./ical-errors";
 import type { CalendarSource, CalendarEvent } from "./types";
 import type { CalendarStore } from "./store";
 import type { SourceSyncService } from "./sync";
@@ -13,6 +14,31 @@ export interface RequestResponse {
 
 export type RequestAdapter = (url: string, headers: Record<string, string>) => Promise<RequestResponse>;
 export type SourceStatus = Pick<SourceCache, "lastAttempt" | "lastSuccess" | "error" | "retryAfter" | "failures">;
+
+type FailureStage = "request" | "parse" | "sync" | "cache";
+
+class SourceFailure extends Error {
+  constructor(public readonly kind: SourceErrorKind, public readonly detail?: ICalErrorCode | number) {
+    super(kind);
+  }
+}
+
+function failureFor(error: unknown, stage: FailureStage): SourceFailure {
+  if (error instanceof SourceFailure) return error;
+  if (stage === "parse") return new SourceFailure("parse",
+    error instanceof ICalError ? error.code : "invalid-syntax");
+  return new SourceFailure(stage === "request" ? "fetch" : stage);
+}
+
+function responseBodyFailure(text: string, headers: Record<string, string> | undefined): SourceFailure | undefined {
+  if (!text.trim()) return new SourceFailure("empty");
+  if (/^\s*(?:<!doctype\s+html|<html\b)/i.test(text)) return new SourceFailure("html");
+  const hasCalendarMarkers = /BEGIN:VCALENDAR/i.test(text) && /END:VCALENDAR/i.test(text);
+  if (hasCalendarMarkers) return undefined;
+  const mediaType = header(headers, "content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  if (mediaType === "text/html") return new SourceFailure("html");
+  return new SourceFailure("non-ical");
+}
 
 export function subscriptionUrl(input: string): string | null {
   const trimmed = input.trim();
@@ -91,15 +117,18 @@ export class SubscriptionService {
         const guard = this.guard(source);
         const cache = this.store.state.sourceCaches[source.id];
         if (!guard.configuredUrl || !guard.normalizedUrl || !cache?.raw || !this.isCurrent(guard)) continue;
+        let stage: FailureStage = "cache";
         try {
           const fingerprint = await urlFingerprint(guard.normalizedUrl);
           if (!this.isCurrent(guard) || cache.urlFingerprint !== fingerprint) continue;
+          stage = "parse";
           const events = this.parser.parse(cache.raw, source.id, range, this.store.state.settings.timeZone, this.trackedIds(source.id));
           if (!this.isCurrent(guard)) continue;
+          stage = "sync";
           await this.sync.accept(source, events, range, state => this.isCurrent(guard, state));
         } catch (error) {
-          await this.fail(guard, error instanceof ICalError && error.kind === "zone" ? "zone" : "parse",
-            new Date().toISOString(), cache.urlFingerprint);
+          const failure = failureFor(error, stage);
+          await this.fail(guard, failure.kind, new Date().toISOString(), cache.urlFingerprint, failure.detail);
         }
       }
     });
@@ -121,7 +150,7 @@ export class SubscriptionService {
     const cache = this.store.state.sourceCaches[sourceId] ?? emptySourceCache();
     return {
       failures: cache.failures, lastAttempt: cache.lastAttempt,
-      lastSuccess: cache.lastSuccess, retryAfter: cache.retryAfter, error: cache.error,
+      lastSuccess: cache.lastSuccess, retryAfter: cache.retryAfter, error: safeStoredSourceError(cache.error),
     };
   }
 
@@ -170,6 +199,7 @@ export class SubscriptionService {
     const cache = this.store.state.sourceCaches[source.id] ?? emptySourceCache();
     const at = new Date().toISOString();
     let fingerprint: string | undefined;
+    let stage: FailureStage = "cache";
     try {
       fingerprint = await urlFingerprint(url);
       if (!this.isCurrent(guard)) return;
@@ -184,14 +214,18 @@ export class SubscriptionService {
       const headers: Record<string, string> = {};
       if (sameEndpoint && cache.etag) headers["If-None-Match"] = cache.etag;
       if (sameEndpoint && cache.lastModified) headers["If-Modified-Since"] = cache.lastModified;
+      stage = "request";
       const response = await this.request(url, headers);
       if (!this.isCurrent(guard)) return;
       if (response.status === 304) {
-        if (!sameEndpoint || !cache.raw) throw new ICalError("parse", "304 without cached feed.");
+        if (!sameEndpoint || !cache.raw) throw new SourceFailure("cache-missing");
+        stage = "parse";
         const events = this.parser.parse(cache.raw, source.id, range, this.store.state.settings.timeZone, this.trackedIds(source.id));
         if (!this.isCurrent(guard)) return;
+        stage = "sync";
         await this.sync.accept(source, events, range, state => this.isCurrent(guard, state));
         if (!this.isCurrent(guard)) return;
+        stage = "cache";
         await this.store.commit([], state => {
           if (!this.isCurrent(guard, state)) return;
           const target = state.sourceCaches[source.id] ??= emptySourceCache();
@@ -204,13 +238,21 @@ export class SubscriptionService {
         });
         return;
       }
-      if (response.status !== 200 || !response.text) throw new Error("Fetch failed.");
-      const events = this.parser.parse(response.text, source.id, range, this.store.state.settings.timeZone, this.trackedIds(source.id));
+      if (response.status !== 200) throw new SourceFailure("http", response.status);
+      const text = response.text ?? "";
+      const bodyFailure = responseBodyFailure(text, response.headers);
+      if (bodyFailure) throw bodyFailure;
+      stage = "parse";
+      const events = this.parser.parse(text, source.id, range, this.store.state.settings.timeZone, this.trackedIds(source.id));
       if (!this.isCurrent(guard)) return;
+      stage = "sync";
+      await this.sync.accept(source, events, range, state => this.isCurrent(guard, state));
+      if (!this.isCurrent(guard)) return;
+      stage = "cache";
       await this.store.commit([], state => {
         if (!this.isCurrent(guard, state)) return;
         const target = state.sourceCaches[source.id] ??= emptySourceCache();
-        target.raw = response.text;
+        target.raw = text;
         target.urlFingerprint = fingerprint;
         target.etag = header(response.headers, "etag");
         target.lastModified = header(response.headers, "last-modified");
@@ -221,25 +263,29 @@ export class SubscriptionService {
         target.retryFingerprint = undefined;
         target.error = undefined;
       });
-      if (!this.isCurrent(guard)) return;
-      await this.sync.accept(source, events, range, state => this.isCurrent(guard, state));
     } catch (error) {
-      await this.fail(guard, error instanceof ICalError
-        ? error.kind === "zone" ? "zone" : "parse" : "fetch", at, fingerprint);
+      const failure = failureFor(error, stage);
+      await this.fail(guard, failure.kind, at, fingerprint, failure.detail);
     }
   }
 
-  private async fail(guard: SourceGuard, kind: "url" | "fetch" | "parse" | "zone",
-    at = new Date().toISOString(), fingerprint?: string): Promise<void> {
+  private async fail(guard: SourceGuard, kind: SourceErrorKind,
+    at = new Date().toISOString(), fingerprint?: string, detail?: ICalErrorCode | number): Promise<void> {
     if (!this.isCurrent(guard)) return;
-    await this.store.commit([], state => {
-      if (!this.isCurrent(guard, state)) return;
-      const cache = state.sourceCaches[guard.sourceId] ??= emptySourceCache();
-      cache.lastAttempt = at;
-      cache.failures++;
-      cache.retryAfter = new Date(Date.parse(at) + retryDelay(cache.failures)).toISOString();
-      cache.retryFingerprint = fingerprint;
-      cache.error = safeSourceError(kind);
-    });
+    try {
+      await this.store.commit([], state => {
+        if (!this.isCurrent(guard, state)) return;
+        const cache = state.sourceCaches[guard.sourceId] ??= emptySourceCache();
+        cache.lastAttempt = at;
+        cache.failures++;
+        cache.retryAfter = new Date(Date.parse(at) + retryDelay(cache.failures)).toISOString();
+        cache.retryFingerprint = fingerprint;
+        cache.error = safeSourceError(kind, detail);
+      });
+    } catch {
+      // The error status could not be saved. Let a manual refresh show the
+      // original classified reason without exposing the store or feed error.
+      throw new Error(safeSourceError(kind, detail));
+    }
   }
 }

@@ -1,4 +1,4 @@
-import { safeSourceError, type SourceCache } from './history';
+import { safeStoredSourceError, type SourceCache } from './history';
 import type { CalendarSource, PluginSettings } from './types';
 
 /** Queue complete settings saves, then resolve each edit against the latest state. */
@@ -30,12 +30,7 @@ export function patchSubscription(settings: PluginSettings, id: string, patch: P
 }
 
 export function safeSubscriptionError(error: string | undefined): string | undefined {
-  if (!error) return undefined;
-  for (const kind of ['url', 'fetch', 'parse', 'zone', 'write'] as const) {
-    const message = safeSourceError(kind);
-    if (error === message) return message;
-  }
-  return safeSourceError('fetch');
+  return safeStoredSourceError(error);
 }
 
 export function subscriptionStatus(source: CalendarSource, cache: SourceCache | undefined, visibleCount?: number): string {
