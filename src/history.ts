@@ -94,7 +94,6 @@ const parserMessages: Record<ICalErrorCode, string> = {
   "invalid-event-time": "The calendar contains an invalid event time.",
   "missing-event-uid": "A calendar event has no UID.",
   "duplicate-event-uid": "The calendar contains duplicate event UIDs.",
-  "orphan-recurrence": "The calendar contains a recurrence without its original event.",
   "missing-event-start": "A calendar event has no start time.",
   "duplicate-recurrence": "The calendar contains duplicate recurrence entries.",
   "invalid-event-interval": "A calendar event has an invalid start/end interval.",

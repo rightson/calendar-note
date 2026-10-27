@@ -7,7 +7,6 @@ export type ICalErrorCode =
   | "invalid-event-time"
   | "missing-event-uid"
   | "duplicate-event-uid"
-  | "orphan-recurrence"
   | "missing-event-start"
   | "duplicate-recurrence"
   | "invalid-event-interval"

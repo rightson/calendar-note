@@ -179,21 +179,12 @@ function normalizePeriodDates(component: InstanceType<typeof ICAL.Component>, ba
   return periods;
 }
 
-/**
- * Parse a bounded visible range. trackedIds keeps existing linked occurrences
- * available when a source moves one outside the current view.
- */
-function parseSingleCalendar(
-  raw: string,
-  sourceId: string,
-  range: CalendarRange,
-  displayZone: string,
-  trackedIds: ReadonlySet<string> = new Set(),
-  seenUids: Set<string>,
-): CalendarEvent[] {
-  const from = Date.parse(range.start);
-  const to = Date.parse(range.end);
-  let calendar: InstanceType<typeof ICAL.Component>;
+type IComponent = InstanceType<typeof ICAL.Component>;
+interface EventGroup { master?: IComponent; exceptions: IComponent[] }
+
+/** Registers embedded zones and returns the calendar's VEVENTs. */
+function readCalendar(raw: string, embedded: Set<string>): IComponent[] {
+  let calendar: IComponent;
   try {
     const parsed: unknown = ICAL.parse(raw);
     if (!Array.isArray(parsed)) throw new Error("Not a calendar component.");
@@ -208,15 +199,18 @@ function parseSingleCalendar(
     throw new ICalError("parse", "Cancellation update cannot be applied as a calendar snapshot.", "unsupported-calendar-update");
   }
 
-  const embedded = new Set<string>();
   for (const component of calendar.getAllSubcomponents("vtimezone")) {
     const tzid = component.getFirstPropertyValue("tzid");
     if (typeof tzid !== "string" || !tzid) throw new ICalError("zone", "Invalid VTIMEZONE.", "invalid-time-zone");
     ICAL.TimezoneService.register(component);
     embedded.add(tzid);
   }
-  const components = calendar.getAllSubcomponents("vevent");
-  const byUid = new Map<string, { master?: InstanceType<typeof ICAL.Component>; exceptions: InstanceType<typeof ICAL.Component>[] }>();
+  return calendar.getAllSubcomponents("vevent");
+}
+
+/** A stream may split a series across calendar objects, so group by UID over the whole feed. */
+function groupByUid(components: IComponent[], embedded: Set<string>): Map<string, EventGroup> {
+  const byUid = new Map<string, EventGroup>();
   for (const component of components) {
     const uid = component.getFirstPropertyValue("uid");
     if (typeof uid !== "string" || !uid) throw new ICalError("parse", "VEVENT lacks UID.", "missing-event-uid");
@@ -236,12 +230,74 @@ function parseSingleCalendar(
     }
     byUid.set(uid, group);
   }
+  return byUid;
+}
 
+/**
+ * Providers publish a lone occurrence when the user is invited to only that
+ * instance or the series start predates the exported window.
+ */
+function addOrphanOccurrences(
+  uid: string,
+  exceptions: IComponent[],
+  sourceId: string,
+  range: CalendarRange,
+  displayZone: string,
+  embedded: Set<string>,
+  trackedIds: ReadonlySet<string>,
+  result: Map<string, CalendarEvent>,
+): void {
+  const from = Date.parse(range.start);
+  const to = Date.parse(range.end);
+  const anchors = new Set<string>();
+  for (const component of exceptions) {
+    const exception = new ICAL.Event(component);
+    const recProp = component.getFirstProperty("recurrence-id");
+    const recZone = propertyZone(recProp);
+    const recurrenceId = anchor(exception.recurrenceId, recZone, displayZone, embedded);
+    if (anchors.has(recurrenceId)) throw new ICalError("parse", "Ambiguous duplicate recurrence exception.", "duplicate-recurrence");
+    anchors.add(recurrenceId);
+    // Without its series there is nothing for a cancellation to remove.
+    if (String(component.getFirstPropertyValue("status") ?? "").toUpperCase() === "CANCELLED") continue;
+    const hasStart = component.hasProperty("dtstart");
+    const eventStart = hasStart ? exception.startDate : exception.recurrenceId;
+    let eventEnd: ITime;
+    if (hasStart) eventEnd = exception.endDate;
+    else {
+      eventEnd = eventStart.clone();
+      if (eventEnd.isDate) eventEnd.day += 1;
+    }
+    const startZone = hasStart ? propertyZone(component.getFirstProperty("dtstart")) : recZone;
+    const fields = intervalFor(eventStart, eventEnd, startZone,
+      propertyZone(component.getFirstProperty("dtend")) ?? startZone, displayZone, embedded, component.hasProperty("dtend"));
+    const event = eventFields(exception, sourceId, recurrenceId, fields);
+    const anchorMs = timeToMillis(exception.recurrenceId, recZone, displayZone, embedded);
+    if (intersectsRange(event, range) || trackedIds.has(event.id) || (anchorMs >= from && anchorMs < to)) {
+      result.set(event.id, event);
+    }
+  }
+}
+
+/**
+ * Expand a bounded visible range. trackedIds keeps existing linked occurrences
+ * available when a source moves one outside the current view.
+ */
+function expandGroups(
+  byUid: Map<string, EventGroup>,
+  sourceId: string,
+  range: CalendarRange,
+  displayZone: string,
+  embedded: Set<string>,
+  trackedIds: ReadonlySet<string>,
+): CalendarEvent[] {
+  const from = Date.parse(range.start);
+  const to = Date.parse(range.end);
   const result = new Map<string, CalendarEvent>();
   for (const [uid, group] of byUid) {
-    if (seenUids.has(uid)) throw new ICalError("parse", "Ambiguous duplicate UID across calendars.", "duplicate-event-uid");
-    seenUids.add(uid);
-    if (!group.master) throw new ICalError("parse", "Orphan recurrence exception.", "orphan-recurrence");
+    if (!group.master) {
+      addOrphanOccurrences(uid, group.exceptions, sourceId, range, displayZone, embedded, trackedIds, result);
+      continue;
+    }
     if (!group.master.hasProperty("dtstart")) {
       throw new ICalError("parse", "VEVENT lacks DTSTART.", "missing-event-start");
     }
@@ -334,7 +390,7 @@ function parseSingleCalendar(
       if (intersectsRange(event, range) || trackedIds.has(id) || (anchorMs >= from && anchorMs < to)) result.set(id, event);
     }
   }
-  return [...result.values()].sort((a, b) => Date.parse(a.start) - Date.parse(b.start) || a.id.localeCompare(b.id));
+  return [...result.values()];
 }
 
 export function parseICalendar(
@@ -352,9 +408,9 @@ export function parseICalendar(
       throw new ICalError("parse", "Invalid calendar range.", "invalid-range");
     }
     if (raw.length > MAX_FEED_BYTES) throw new ICalError("limit", "iCalendar feed exceeds size limit.", "feed-too-large");
-    const calendars = splitCalendars(raw);
-    const seenUids = new Set<string>();
-    const events = calendars.flatMap(calendar => parseSingleCalendar(calendar, sourceId, range, displayZone, trackedIds, seenUids));
+    const embedded = new Set<string>();
+    const components = splitCalendars(raw).flatMap(calendar => readCalendar(calendar, embedded));
+    const events = expandGroups(groupByUid(components, embedded), sourceId, range, displayZone, embedded, trackedIds);
     return events.sort((a, b) => Date.parse(a.start) - Date.parse(b.start) || a.id.localeCompare(b.id));
   } catch (error) {
     if (error instanceof ICalError) throw error;
