@@ -1,9 +1,10 @@
-import { Notice, PluginSettingTab, Setting, type App } from 'obsidian';
+import { Notice, PluginSettingTab, Setting, type App, type ToggleComponent } from 'obsidian';
 import moment from 'moment-timezone';
 import type CalendarNotePlugin from './main';
 import type { CalendarSource, PluginSettings } from './types';
 import { isEventPropertiesDefault, resolveDailySettings, resolveWeeklySettings } from './settings';
 import { dailyNotePath, eventNotePath, weeklyNotePath, folderPath } from './paths';
+import { patchSubscription, subscriptionStatus } from './subscription-settings';
 
 const sample = { id: 'local|sample', sourceId: 'local', uid: 'sample', title: 'Sample event', start: '2026-10-23T09:00:00+08:00', end: '2026-10-23T10:00:00+08:00', allDay: false };
 type TextSettingKey = 'eventPattern' | 'dailyFolder' | 'dailyFormat' | 'dailyTemplate'
@@ -36,10 +37,12 @@ export function validatePluginSettings(app: App, settings: PluginSettings): { ev
 }
 
 export class CalendarNoteSettingTab extends PluginSettingTab {
+  private statusElements = new Map<string, HTMLElement>();
   constructor(app: App, private plugin: CalendarNotePlugin) { super(app, plugin); }
   display(): void {
     const root = this.containerEl;
     root.empty();
+    this.statusElements.clear();
     const settings = this.plugin.store.state.settings;
     root.createEl('p', { text: 'Local events work without a calendar subscription.' });
     new Setting(root).setName('Note paths').setHeading();
@@ -75,9 +78,8 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
     this.number(root, 'Refresh interval (minutes)', 'syncIntervalMinutes');
     for (const source of settings.sources) this.sourceSetting(root, source);
     new Setting(root).setName('Add subscription').setDesc('A blank URL stays inactive.').addButton(button => button.setButtonText('Add calendar').onClick(async () => {
-      const next = structuredClone(this.plugin.store.state.settings);
-      next.sources.push({ id: crypto.randomUUID(), name: 'New calendar', url: '', color: '#5885d8', enabled: false });
-      await this.save(next);
+      const id = crypto.randomUUID();
+      await this.save(next => { next.sources.push({ id, name: 'New calendar', url: '', color: '#5885d8', enabled: false }); });
     }));
     new Setting(root).setName('Event Note diagnostics').setHeading();
     if (!this.plugin.notes.diagnostics.length) root.createEl('p', { text: 'No invalid Event Notes found.', cls: 'setting-item-description' });
@@ -86,13 +88,30 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
       const list = root.createEl('ul', { cls: 'cn-diagnostics' });
       for (const diagnostic of this.plugin.notes.diagnostics) list.createEl('li', { text: diagnostic });
     }
+    this.refreshSubscriptionStatus();
   }
 
-  private async save(next: PluginSettings): Promise<boolean> {
+  hide(): void {
+    this.statusElements.clear();
+    super.hide();
+  }
+
+  refreshSubscriptionStatus(): void {
+    for (const [id, element] of this.statusElements) {
+      const source = this.plugin.store.state.settings.sources.find(item => item.id === id);
+      if (!source) continue;
+      const count = this.plugin.getVisibleRange()
+        ? this.plugin.events.filter(event => event.sourceId === id && event.status !== 'cancelled' && event.status !== 'removed').length
+        : undefined;
+      element.setText(subscriptionStatus(source, this.plugin.store.state.sourceCaches[id], count));
+    }
+  }
+
+  private async save(change: (settings: PluginSettings) => void, redraw = true): Promise<boolean> {
     try {
-      validatePluginSettings(this.app, next);
-      await this.plugin.saveSettings(next);
-      this.display();
+      await this.plugin.updateSettings(change, next => { validatePluginSettings(this.app, next); });
+      if (redraw) this.display();
+      else this.refreshSubscriptionStatus();
       return true;
     } catch (error) {
       new Notice(error instanceof Error ? error.message : 'Could not save settings.');
@@ -105,9 +124,7 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
       input.inputEl.addEventListener('blur', () => {
         const value = input.getValue().trim();
         if (value === this.plugin.store.state.settings[key]) return;
-        const next = structuredClone(this.plugin.store.state.settings);
-        (next as unknown as Record<string, unknown>)[key] = value;
-        void this.save(next);
+        void this.save(next => { (next as unknown as Record<string, unknown>)[key] = value; });
       });
       input.inputEl.addEventListener('keydown', e => { if (e.key === 'Enter') input.inputEl.blur(); });
     });
@@ -119,9 +136,7 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
       input.inputEl.addEventListener('blur', () => {
         const value = Number(input.getValue());
         if (value === this.plugin.store.state.settings[key]) return;
-        const next = structuredClone(this.plugin.store.state.settings);
-        next[key] = value;
-        void this.save(next);
+        void this.save(next => { next[key] = value; });
       });
       input.inputEl.addEventListener('keydown', e => { if (e.key === 'Enter') input.inputEl.blur(); });
     });
@@ -133,39 +148,46 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
       for (const [value, label] of values) select.addOption(value, label);
       select.setValue(String(this.plugin.store.state.settings[key]));
       select.onChange(value => {
-        const next = structuredClone(this.plugin.store.state.settings);
-        (next as unknown as Record<string, unknown>)[key] = key === 'snapMinutes' ? Number(value) : value;
-        void this.save(next);
+        void this.save(next => { (next as unknown as Record<string, unknown>)[key] = key === 'snapMinutes' ? Number(value) : value; });
       });
     });
   }
   private sourceSetting(root: HTMLElement, source: CalendarSource): void {
     const section = root.createDiv({ cls: 'cn-source-settings' });
-    new Setting(section).setName(source.name).setHeading();
+    const heading = new Setting(section).setName(source.name).setHeading();
+    let enabledToggle: ToggleComponent | undefined;
+    let syncingToggle = false;
     const update = (patch: Partial<CalendarSource>) => {
-      const next = structuredClone(this.plugin.store.state.settings);
-      const target = next.sources.find(item => item.id === source.id);
-      if (!target) return;
-      Object.assign(target, patch);
-      if (!target.url.trim()) target.enabled = false;
-      void this.save(next);
+      void this.save(next => { patchSubscription(next, source.id, patch); }, false).then(saved => {
+        if (saved && patch.name !== undefined) heading.setName(patch.name);
+        const latest = this.plugin.store.state.settings.sources.find(item => item.id === source.id);
+        if (latest && enabledToggle && enabledToggle.getValue() !== latest.enabled) {
+          syncingToggle = true;
+          try { enabledToggle.setValue(latest.enabled); }
+          finally { syncingToggle = false; }
+        }
+      });
     };
     new Setting(section).setName('Name').addText(input => {
       input.setValue(source.name);
       input.inputEl.addEventListener('blur', () => update({ name: input.getValue().trim() }));
     });
+    let currentUrl = () => source.url;
     new Setting(section).setName('Subscription URL').setDesc('HTTPS or webcal. Stored privately in plugin data.').addText(input => {
       input.setPlaceholder('https://example.com/calendar.ics').setValue(source.url);
+      currentUrl = () => input.getValue().trim();
       input.inputEl.addEventListener('blur', () => update({ url: input.getValue().trim() }));
     });
     new Setting(section).setName('Color').addColorPicker(picker => picker.setValue(source.color).onChange(value => update({ color: value })));
-    new Setting(section).setName('Enabled').addToggle(toggle => toggle.setValue(source.enabled).onChange(value => update({ enabled: value && !!source.url.trim() })));
+    new Setting(section).setName('Enabled').addToggle(toggle => {
+      enabledToggle = toggle;
+      toggle.setValue(source.enabled).onChange(value => {
+        if (!syncingToggle) update({ url: currentUrl(), enabled: value });
+      });
+    });
     new Setting(section).setName('Remove subscription').setDesc('Existing Event Notes remain in the Vault.').addButton(button => button.setButtonText('Remove').onClick(() => {
-      const next = structuredClone(this.plugin.store.state.settings);
-      next.sources = next.sources.filter(item => item.id !== source.id);
-      void this.save(next);
+      void this.save(next => { next.sources = next.sources.filter(item => item.id !== source.id); });
     }));
-    const cache = this.plugin.store.state.sourceCaches[source.id];
-    if (cache) section.createEl('p', { text: cache.error ? `Last refresh failed: ${cache.error}` : cache.lastSuccess ? `Last refreshed: ${cache.lastSuccess}` : 'Not refreshed yet.', cls: 'setting-item-description' });
+    this.statusElements.set(source.id, section.createEl('p', { cls: 'setting-item-description' }));
   }
 }

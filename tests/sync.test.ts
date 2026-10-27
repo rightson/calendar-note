@@ -236,6 +236,29 @@ test("invalid feed leaves last accepted event and raw cache intact", async () =>
   assert.match(store.state.sourceCaches.work.error!, /valid iCalendar/);
 });
 
+test("BOM feed accepts a timed point and normal event; removing the boundary point is reconciled", async () => {
+  const { store, sync } = setup();
+  const point = `BEGIN:VEVENT\r\nUID:point\r\nDTSTAMP:20261001T000000Z\r\nDTSTART:20261020T000000Z\r\nEND:VEVENT\r\n`;
+  const atEnd = `BEGIN:VEVENT\r\nUID:at-end\r\nDTSTAMP:20261001T000000Z\r\nDTSTART:20261030T000000Z\r\nEND:VEVENT\r\n`;
+  const normal = `BEGIN:VEVENT\r\nUID:normal\r\nDTSTAMP:20261001T000000Z\r\nDTSTART:20261022T100000Z\r\nDTEND:20261022T110000Z\r\nEND:VEVENT\r\n`;
+  const feed = (includePoint: boolean) => `\uFEFFBEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Calendar-Note tests//EN\r\n${includePoint ? point : ""}${atEnd}${normal}END:VCALENDAR\r\n`;
+  let body = feed(true);
+  const subscriptions = new SubscriptionService(store, sync, async () => ({ status: 200, text: body }));
+  await subscriptions.refresh(range, { force: true });
+  const pointId = sourceEventId("work", "point");
+  assert.equal(store.state.sourceCaches.work.error, undefined);
+  assert.equal(store.state.sourceCaches.work.raw, body);
+  assert.equal(store.state.sourceCaches.work.accepted[pointId].event.start,
+    store.state.sourceCaches.work.accepted[pointId].event.end);
+  assert.deepEqual(subscriptions.getEvents(range).map(event => event.uid), ["point", "normal"]);
+  assert.equal(store.state.sourceCaches.work.accepted[sourceEventId("work", "at-end")], undefined);
+
+  body = feed(false);
+  await subscriptions.refresh(range, { force: true });
+  assert.equal(store.state.sourceCaches.work.accepted[pointId].event.status, "removed");
+  assert.equal(store.state.history.find(entry => entry.eventId === pointId)?.status, "removal_attention");
+});
+
 test("changing an endpoint does not send the prior feed's conditional validator", async () => {
   const { store, sync } = setup();
   const headersSeen: Record<string, string>[] = [];

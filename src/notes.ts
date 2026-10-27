@@ -14,18 +14,40 @@ export interface ParsedEventNote {
   title: string;
 }
 
-export function validateInterval(start: string, end: string, allDay = false): void {
+function validateIntervalWithMinimum(start: string, end: string, allDay: boolean, minimumMinutes: number): void {
   const iso = /^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d(?:\.\d+)?)?(?:Z|[+-]\d\d:\d\d)$/;
   if (!iso.test(start) || !iso.test(end)) throw new Error('Event times must be ISO timestamps with an offset.');
   const from = moment.parseZone(start, moment.ISO_8601, true);
   const to = moment.parseZone(end, moment.ISO_8601, true);
-  if (!from.isValid() || !to.isValid() || to.valueOf() - from.valueOf() < 15 * 60_000) {
-    throw new Error('The event must end at least 15 minutes after it starts.');
+  if (!from.isValid() || !to.isValid() || to.valueOf() - from.valueOf() < minimumMinutes * 60_000) {
+    throw new Error(minimumMinutes ? 'The event must end at least 15 minutes after it starts.'
+      : 'The imported event cannot end before it starts.');
   }
   if (allDay && (!/T00:00(?::00)?(?:\.0+)?(?:Z|[+-]\d\d:\d\d)$/.test(start)
-    || !/T00:00(?::00)?(?:\.0+)?(?:Z|[+-]\d\d:\d\d)$/.test(end))) {
+    || !/T00:00(?::00)?(?:\.0+)?(?:Z|[+-]\d\d:\d\d)$/.test(end)
+    || end.slice(0, 10) <= start.slice(0, 10) || to.valueOf() <= from.valueOf())) {
     throw new Error('All-day events must use midnight boundaries and an exclusive end.');
   }
+}
+
+/** Local events and user changes have a minimum duration. */
+export function validateInterval(start: string, end: string, allDay = false): void {
+  validateIntervalWithMinimum(start, end, allDay, 15);
+}
+
+/** Source events may be points or shorter than the local editing minimum. */
+export function validateSourceInterval(start: string, end: string, allDay = false): void {
+  validateIntervalWithMinimum(start, end, allDay, 0);
+}
+
+export function isImportedEventIdentity(id: string, source: string | undefined, uid: string | undefined): boolean {
+  return !id.startsWith('local|') && Boolean(source?.trim() && source !== 'local' && uid?.trim());
+}
+
+export function validateEventInterval(event: CalendarEvent): void {
+  const validate = isImportedEventIdentity(event.id, event.sourceId, event.uid)
+    ? validateSourceInterval : validateInterval;
+  validate(event.start, event.end, event.allDay);
 }
 
 export function splitFrontmatter(content: string): { lines: string[]; body: string; newline: string; has: boolean } {
@@ -44,15 +66,18 @@ export function parseEventNote(content: string, path: string): ParsedEventNote |
   const data = doc.toJS() as Record<string, unknown> | null;
   if (!data || typeof data.event_id !== 'string') return null;
   if (typeof data.start !== 'string' || typeof data.end !== 'string') throw new Error(`Invalid event times in ${path}.`);
-  validateInterval(data.start, data.end, data.all_day === true);
+  const source = typeof data.source === 'string' ? data.source : undefined;
+  const uid = typeof data.ical_uid === 'string' ? data.ical_uid : undefined;
+  const validate = isImportedEventIdentity(data.event_id, source, uid) ? validateSourceInterval : validateInterval;
+  validate(data.start, data.end, data.all_day === true);
   const heading = /^#\s+(.+?)\s*$/m.exec(fm.body);
   return {
     id: data.event_id,
     start: data.start,
     end: data.end,
     allDay: data.all_day === true,
-    source: typeof data.source === 'string' ? data.source : undefined,
-    uid: typeof data.ical_uid === 'string' ? data.ical_uid : undefined,
+    source,
+    uid,
     recurrenceId: typeof data.recurrence_id === 'string' ? data.recurrence_id : undefined,
     title: heading?.[1] ?? path.split('/').pop()!.replace(/\.md$/i, ''),
   };
@@ -60,7 +85,7 @@ export function parseEventNote(content: string, path: string): ParsedEventNote |
 
 /** Replace only managed top-level properties; preserve all other YAML and body bytes. */
 export function writeEventFrontmatter(content: string, event: CalendarEvent): string {
-  validateInterval(event.start, event.end, event.allDay);
+  validateEventInterval(event);
   const fm = splitFrontmatter(content);
   const original = fm.has ? parseEventNote(content, 'Event Note') : null;
   if (original && original.id !== event.id) throw new Error('The Event Note belongs to another event.');
@@ -109,7 +134,8 @@ export function removeDuplicateEventNoteTitle(content: string, path: string): st
 export function eventBullet(event: CalendarEvent, notePath: string, zone: string): string {
   const from = dateAt(event.start, zone);
   const to = dateAt(event.end, zone);
-  const time = event.allDay ? 'All day' : `${from.format('HH:mm')}–${to.format('YYYY-MM-DD') === from.format('YYYY-MM-DD') ? to.format('HH:mm') : to.format('YYYY-MM-DD HH:mm')}`;
+  const time = event.allDay ? 'All day' : Date.parse(event.start) === Date.parse(event.end) ? from.format('HH:mm')
+    : `${from.format('HH:mm')}–${to.format('YYYY-MM-DD') === from.format('YYYY-MM-DD') ? to.format('HH:mm') : to.format('YYYY-MM-DD HH:mm')}`;
   const alias = event.title.replace(/[[\]|#\r\n]/g, ' ').replace(/\s+/g, ' ').trim() || 'Untitled event';
   return `- ${time} [[${notePath.replace(/\.md$/i, '')}|${alias}]]`;
 }

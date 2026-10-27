@@ -5,7 +5,7 @@ import { CalendarStore, type RecoveryJournal, type StoreIO } from '../src/store'
 import { freshState } from '../src/state';
 import { DEFAULT_SETTINGS } from '../src/settings';
 import type { App } from 'obsidian';
-import { addEventBullet, newEventNote, parseEventNote, removeDuplicateEventNoteTitle, validateInterval, writeEventFrontmatter } from '../src/notes';
+import { addEventBullet, newEventNote, parseEventNote, removeDuplicateEventNoteTitle, validateInterval, validateSourceInterval, writeEventFrontmatter } from '../src/notes';
 import { emptySourceCache } from '../src/history';
 import { sourceEventId } from '../src/ical';
 import type { CalendarEvent } from '../src/types';
@@ -112,6 +112,61 @@ test('rescheduling an unlinked imported cache event creates its note and Daily l
   assert.equal(store.state.sourceCaches.work.accepted[event.id].event.start, start);
 });
 
+test('imported point Event Note survives reopening, restart, rescan, and a source move', async () => {
+  const { io, service, store } = setup();
+  const source = { id: 'work', name: 'Work', url: 'https://example.test/feed', color: '#888', enabled: true };
+  store.state.settings.sources.push(source);
+  const at = '2026-10-22T10:00:00+08:00';
+  const event = { ...imported(), start: at, end: at };
+  const cache = emptySourceCache();
+  cache.accepted[event.id] = { event, revision: 0 };
+  store.state.sourceCaches.work = cache;
+  const path = await service.openEvent(event);
+  const original = store.state.noteLinks[event.id];
+  assert.match(original.bullet, /^- 10:00 \[\[/);
+  assert.doesNotMatch(original.bullet, /10:00–10:00/);
+  assert.throws(() => parseEventNote(io.files.get(path)!.replace('ical_uid: "uid-1"\n', ''), path), /15 minutes/);
+  io.files.set(path, io.files.get(path)!.replace('\n---\n', '\nmy_field: retained\n---\n') + '\nMy meeting notes.\n');
+  await service.openEvent(event);
+  assert.deepEqual([parseEventNote(io.files.get(path)!, path)?.start, parseEventNote(io.files.get(path)!, path)?.end], [at, at]);
+  assert.equal((await service.scanEvents()).find(item => item.id === event.id)?.end, at);
+  assert.equal(store.state.overrides[event.id], undefined);
+
+  const restarted = setup(io);
+  await restarted.store.recover();
+  assert.equal((await restarted.service.scanEvents()).find(item => item.id === event.id)?.start, at);
+  assert.equal(restarted.store.state.overrides[event.id], undefined);
+  const movedAt = '2026-10-23T09:30:00+08:00';
+  await new SourceSyncService(restarted.store, restarted.service).accept(source,
+    [{ ...event, start: movedAt, end: movedAt }], { start: '2026-10-20T00:00:00Z', end: '2026-10-26T00:00:00Z' });
+  const moved = restarted.store.state.noteLinks[event.id];
+  assert.match(moved.dailyPath, /2026-10-23\.md$/);
+  assert.match(moved.bullet, /^- 09:30 \[\[/);
+  assert.doesNotMatch(io.files.get(original.dailyPath)!, /\[\[Calendar Notes\/Imported/);
+  assert.match(io.files.get(moved.dailyPath)!, /09:30 \[\[Calendar Notes\/Imported/);
+  assert.match(io.files.get(path)!, /my_field: retained[\s\S]*My meeting notes\./);
+  assert.deepEqual([parseEventNote(io.files.get(path)!, path)?.start, parseEventNote(io.files.get(path)!, path)?.end],
+    [movedAt, movedAt]);
+  assert.equal(restarted.store.state.overrides[event.id], undefined);
+});
+
+test('imported short source interval is kept while manual short changes are rejected', async () => {
+  const { io, service, store } = setup();
+  const short = { ...imported(), start: '2026-10-22T10:00:00+08:00', end: '2026-10-22T10:05:00+08:00' };
+  const cache = emptySourceCache();
+  cache.accepted[short.id] = { event: short, revision: 0 };
+  store.state.sourceCaches.work = cache;
+  const path = await service.openEvent(short);
+  assert.equal(parseEventNote(io.files.get(path)!, path)?.end, short.end);
+  assert.equal((await service.scanEvents()).find(item => item.id === short.id)?.end, short.end);
+  await assert.rejects(service.reschedule(short, { start: short.start, end: short.start }), /15 minutes/);
+  await assert.rejects(service.createLocal({ title: 'Too short', start: short.start, end: short.end }), /15 minutes/);
+  io.files.set(path, io.files.get(path)!.replace(short.end, '2026-10-22T10:06:00+08:00'));
+  await service.scanEvents();
+  assert.match(service.diagnostics.join(' '), /15 minutes/);
+  assert.equal(store.state.overrides[short.id], undefined);
+});
+
 for (const allDay of [false, true]) {
   test(`${allDay ? 'all-day date' : 'timed instant'} offset changes do not invent an imported override`, async () => {
     const { io, service, store } = setup();
@@ -165,6 +220,10 @@ test('timestamp validation rejects normalized impossible dates and short interva
   assert.throws(() => validateInterval('2026-02-30T10:00:00+08:00', '2026-02-30T11:00:00+08:00'), /15 minutes/);
   assert.throws(() => validateInterval('2026-10-23T10:00:00+08:00', '2026-10-23T10:14:00+08:00'), /15 minutes/);
   assert.doesNotThrow(() => validateInterval('2026-10-23T23:00:00+08:00', '2026-10-24T02:00:00+08:00'));
+  assert.doesNotThrow(() => validateSourceInterval(start, start));
+  assert.throws(() => validateSourceInterval(end, start), /cannot end before/);
+  assert.throws(() => validateSourceInterval('2026-10-23T00:00:00+08:00', '2026-10-23T00:00:00+08:00', true), /exclusive end/);
+  assert.throws(() => validateSourceInterval('2026-10-23T09:00:00+08:00', '2026-10-24T00:00:00+08:00', true), /midnight/);
 });
 
 test('local note properties remain compact and an edited body survives a cross-date move', async () => {

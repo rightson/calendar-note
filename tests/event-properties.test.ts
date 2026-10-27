@@ -36,6 +36,17 @@ test('current frontmatter is required even if a path was once an Event Note', ()
   assert.equal(isEventNoteFrontmatter({ ...eventFrontmatter, event_id: '4de03a64-0d4c-4b16-9b72-3e6805ebdd79' }), true);
 });
 
+test('point frontmatter is recognized only with imported source and UID', () => {
+  const point = { ...eventFrontmatter, end: eventFrontmatter.start };
+  assert.equal(isEventNoteFrontmatter(point), false);
+  assert.equal(isEventNoteFrontmatter({ ...point, source: 'work' }), false);
+  assert.equal(isEventNoteFrontmatter({ ...point, ical_uid: 'uid-1' }), false);
+  assert.equal(isEventNoteFrontmatter({ ...point, source: 'work', ical_uid: 'uid-1' }), false);
+  assert.equal(isEventNoteFrontmatter({ ...point, event_id: 'work|uid-1', source: 'work', ical_uid: 'uid-1' }), true);
+  assert.equal(isEventNoteFrontmatter({ ...point, event_id: 'work|uid-1', source: 'work', ical_uid: 'uid-1',
+    end: '2026-10-23T11:59:59+08:00' }), false);
+});
+
 test('opening the same Event Note in another view leaves the first view manual state alone', () => {
   const state = new PropertiesOpenState<object, object>();
   const left = {}, right = {}, path = 'Calendar Notes/Event.md';

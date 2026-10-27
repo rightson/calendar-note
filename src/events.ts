@@ -5,7 +5,7 @@ import { resolveDailySettings, resolveWeeklySettings, resolveWeekRules } from '.
 import { pathKey, type NoteLink } from './state';
 import { CalendarStore, type PlannedWrite } from './store';
 import type { CalendarEvent, Interval, PluginSettings } from './types';
-import { addEventBullet, eventBullet, hasTrackedBullet, newEventNote, parseEventNote, removeDuplicateEventNoteTitle, removeTrackedBullet, replaceRenamedBullet, validateInterval, writeEventFrontmatter } from './notes';
+import { addEventBullet, eventBullet, hasTrackedBullet, newEventNote, parseEventNote, removeDuplicateEventNoteTitle, removeTrackedBullet, replaceRenamedBullet, validateEventInterval, validateInterval, writeEventFrontmatter } from './notes';
 
 export interface EventWritePlan {
   writes: PlannedWrite[];
@@ -165,6 +165,8 @@ export class EventNoteService {
             diagnostics.push(`Imported Event Note identity needs review in ${path}.`); continue;
           }
           const difference = !sameEffectiveInterval(note, accepted);
+          // A changed note interval is a user override, so it keeps the editing minimum.
+          if (difference) validateInterval(note.start, note.end, note.allDay);
           if (difference) overrides[note.id] = { start: note.start, end: note.end, allDay: note.allDay };
           else delete overrides[note.id];
           events.set(note.id, { ...accepted, title: note.title, start: note.start, end: note.end, allDay: note.allDay });
@@ -255,7 +257,7 @@ export class EventNoteService {
   }
 
   async planEventWrites(event: CalendarEvent): Promise<EventWritePlan> {
-    validateInterval(event.start, event.end, event.allDay);
+    validateEventInterval(event);
     const settings = this.getSettings();
     const notePath = await this.availableEventPath(event);
     await this.assertPathType(notePath, 'event', event.id);
@@ -343,7 +345,7 @@ export class EventNoteService {
 
   async updateLinkedInterval(event: CalendarEvent, interval: Interval): Promise<IntervalWritePlan> {
     const updated = { ...event, ...interval, allDay: interval.allDay ?? event.allDay };
-    validateInterval(updated.start, updated.end, updated.allDay);
+    validateEventInterval(updated);
     if (!this.store.state.noteLinks[event.id]) return { writes: [], event: updated };
     const plan = await this.planEventWrites(updated);
     return { writes: plan.writes, link: plan.link, event: updated };
@@ -352,6 +354,7 @@ export class EventNoteService {
   async reschedule(event: CalendarEvent, interval: Interval): Promise<CalendarEvent> {
     return this.serialized(async () => {
       const updated = { ...event, ...interval, allDay: interval.allDay ?? event.allDay };
+      validateInterval(updated.start, updated.end, updated.allDay);
       const plan = await this.planEventWrites(updated);
       await this.store.commit(plan.writes, state => {
         state.noteLinks[event.id] = plan.link;
