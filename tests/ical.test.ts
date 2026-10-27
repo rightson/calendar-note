@@ -346,3 +346,53 @@ END:VEVENT`);
   assert.throws(() => parseICalendar(malformed, "x", range, "UTC"),
     (error: unknown) => error instanceof ICalError && error.code === "invalid-syntax");
 });
+
+test("an occurrence without its series imports as a standalone event; a lone cancellation is skipped", () => {
+  const raw = feed(`BEGIN:VEVENT
+UID:invited-once
+RECURRENCE-ID;TZID=Asia/Taipei:20260310T090000
+SUMMARY:One instance
+DTSTART;TZID=Asia/Taipei:20260310T100000
+DTEND;TZID=Asia/Taipei:20260310T110000
+END:VEVENT
+BEGIN:VEVENT
+UID:bare-instance
+RECURRENCE-ID;VALUE=DATE:20260311
+SUMMARY:All day instance
+END:VEVENT
+BEGIN:VEVENT
+UID:cancelled-instance
+RECURRENCE-ID:20260312T090000Z
+STATUS:CANCELLED
+END:VEVENT`);
+  const events = parseICalendar(raw, "x", range, "UTC");
+  assert.deepEqual(events.map(event => [event.uid, event.title, event.start, event.end, event.allDay]), [
+    ["invited-once", "One instance", "2026-03-10T02:00:00+00:00", "2026-03-10T03:00:00+00:00", false],
+    ["bare-instance", "All day instance", "2026-03-11T00:00:00+00:00", "2026-03-12T00:00:00+00:00", true],
+  ]);
+  assert.equal(events[0].id, sourceEventId("x", "invited-once", "2026-03-10T01:00:00.000Z"));
+});
+
+test("a stream may place a series and its exception in separate calendars", () => {
+  const master = feed(`BEGIN:VEVENT
+UID:split
+SUMMARY:Daily
+DTSTART:20260310T090000Z
+DTEND:20260310T100000Z
+RRULE:FREQ=DAILY;COUNT=2
+END:VEVENT`);
+  const exception = feed(`BEGIN:VEVENT
+UID:split
+RECURRENCE-ID:20260311T090000Z
+SUMMARY:Moved
+DTSTART:20260311T150000Z
+DTEND:20260311T160000Z
+END:VEVENT`);
+  for (const raw of [master + exception, exception + master]) {
+    const events = parseICalendar(raw, "x", range, "UTC");
+    assert.deepEqual(events.map(event => [event.title, event.start]), [
+      ["Daily", "2026-03-10T09:00:00+00:00"],
+      ["Moved", "2026-03-11T15:00:00+00:00"],
+    ]);
+  }
+});
