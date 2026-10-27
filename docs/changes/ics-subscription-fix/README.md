@@ -14,7 +14,7 @@ As a Calendar-Note user, I want a valid iCalendar subscription URL to import rel
 
 The specific feed URL reported by the user was not provided, so that feed and its provider response have not been independently verified. A downloadable file may still be an HTML sign-in or error response rather than an ICS response. See [subscription troubleshooting](../../manuals/DEVELOPMENT.md#subscription-troubleshooting).
 
-The exact cause of the reported import failure remains unknown. Current parser compatibility gaps include multiple complete `VCALENDAR` streams in one response and `RDATE;VALUE=PERIOD` recurrence values; both are valid iCalendar forms that another client may accept. Delta objects sent with `METHOD:CANCEL` are unsupported, with or without event times. They must produce a specific error rather than be interpreted as a full snapshot, which could remove unrelated imported events. Existing handling of `STATUS:CANCELLED` in complete snapshots is unchanged. These are confirmed product gaps, not confirmed properties of the user's feed.
+The exact cause of the reported import failure remains unknown. The reproduced pre-fix parser gaps included multiple complete `VCALENDAR` streams in one response and `RDATE;VALUE=PERIOD` recurrence values; both are valid iCalendar forms that another client may accept. Delta objects sent with `METHOD:CANCEL` are unsupported, with or without event times. They must produce a specific error rather than be interpreted as a full snapshot, which could remove unrelated imported events. Existing handling of `STATUS:CANCELLED` in complete snapshots is unchanged. These are confirmed pre-fix gaps, not confirmed properties of the user's feed.
 
 ## Scoped fixes
 
@@ -33,7 +33,7 @@ The exact cause of the reported import failure remains unknown. Current parser c
 - `npm run typecheck` — passed.
 - Legacy browser-preview suite — passed (all five test files).
 - `npm run package`, `node --check main.js`, and ZIP integrity — passed.
-- Feed fixtures — passed: public Google feed rendered 33 events; appending a complete calendar stream rendered 34; an all-day event with only `RDATE` retained its `DTSTART`, date anchors, and exclusive end.
+- Feed fixtures — passed at the automated parser/source level: the public Google feed parsed 33 events; appending a complete calendar stream parsed 34; an all-day event with only `RDATE` retained its `DTSTART`, date anchors, and exclusive end. These checks do not establish native UI rendering.
 - Native Obsidian verification of the new parser compatibility and diagnostics changes: pending.
 - Earlier native checks covered settings persistence, BOM/zero-duration rendering, and sanitized Settings status/cache retention on Obsidian 1.14.5/macOS. They did not inspect the main-calendar failure banner and do not verify the current parser compatibility or diagnostics changes.
 - `git diff --check`
