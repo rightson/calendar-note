@@ -185,7 +185,7 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
         if (!syncingToggle) update({ url: currentUrl(), enabled: value });
       });
     });
-    new Setting(section).setName('Remove subscription').setDesc('Existing Event Notes remain in the Vault.').addButton(button => button.setButtonText('Remove').onClick(() => {
+    new Setting(section).setName('Remove subscription').setDesc('Existing Event Notes remain in the Vault and are reused if you add the same calendar again.').addButton(button => button.setButtonText('Remove').onClick(() => {
       void this.save(next => { next.sources = next.sources.filter(item => item.id !== source.id); });
     }));
     this.statusElements.set(source.id, section.createEl('p', { cls: 'setting-item-description' }));

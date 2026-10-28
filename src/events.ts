@@ -5,7 +5,7 @@ import { resolveDailySettings, resolveWeeklySettings, resolveWeekRules } from '.
 import { pathKey, type NoteLink } from './state';
 import { CalendarStore, type PlannedWrite } from './store';
 import type { CalendarEvent, Interval, PluginSettings } from './types';
-import { eventBullet, hasEventBullet, newEventNote, parseEventNote, removeDuplicateEventNoteTitle, removeEventBullets, upsertEventBullet, validateEventInterval, validateInterval, writeEventFrontmatter } from './notes';
+import { adoptEventFrontmatter, eventBullet, hasEventBullet, newEventNote, parseEventNote, removeDuplicateEventNoteTitle, removeEventBullets, upsertEventBullet, validateEventInterval, validateInterval, writeEventFrontmatter } from './notes';
 
 export interface EventWritePlan {
   writes: PlannedWrite[];
@@ -332,8 +332,52 @@ export class EventNoteService {
     return { writes, notePath, dailyPath, bullet, link };
   }
 
-  async openEvent(event: CalendarEvent): Promise<string> {
+  /**
+   * Removing a subscription and adding it again gives its events new IDs, so
+   * their Event Notes no longer match. Take over the note the removed calendar
+   * left for the same iCal event instead of creating a duplicate beside it.
+   */
+  private async adoptOrphanNote(event: CalendarEvent): Promise<CalendarEvent> {
+    if (event.sourceId === 'local' || await this.findEventPath(event.id)) return event;
+    const configured = new Set(this.getSettings().sources.map(source => source.id));
+    const orphans: { path: string; content: string; id: string }[] = [];
+    for (const path of await this.store.io.listMarkdown()) {
+      const content = await this.store.io.read(path);
+      if (content === null || !content.includes('ical_uid:')) continue;
+      let note: ReturnType<typeof parseEventNote>;
+      try { note = parseEventNote(content, path); }
+      catch { continue; }
+      if (note?.source && !configured.has(note.source) && note.uid === event.uid && note.recurrenceId === event.recurrenceId) {
+        orphans.push({ path, content, id: note.id });
+      }
+    }
+    if (!orphans.length) return event;
+    const linked = orphans.filter(orphan => this.store.state.noteLinks[orphan.id]?.eventPath === orphan.path);
+    const chosen = orphans.length === 1 ? orphans[0] : linked.length === 1 ? linked[0] : undefined;
+    if (!chosen) {
+      throw new Error(`Several Event Notes from a removed calendar match this event: ${orphans.map(orphan => orphan.path).join(', ')}. Delete or merge the extra notes, then open the event again.`);
+    }
+    // Keep the user's own times; otherwise the note follows the new source.
+    const override = this.store.state.overrides[chosen.id];
+    const adopted = override ? { ...event, ...override, allDay: override.allDay ?? event.allDay } : event;
+    // Hand over the path claim and link first: the note write below must be
+    // owned by the new ID. An interrupted adoption is redone on the next open.
+    await this.store.commit([], state => {
+      const link = state.noteLinks[chosen.id] ?? state.noteLinks[event.id];
+      delete state.noteLinks[chosen.id];
+      if (link) state.noteLinks[event.id] = link;
+      if (override) state.overrides[event.id] = override;
+      delete state.overrides[chosen.id];
+      state.pathTypes[pathKey(chosen.path)] = { type: 'event', ownerId: event.id };
+    });
+    await this.store.commit([{ path: chosen.path, before: chosen.content, after: adoptEventFrontmatter(chosen.content, adopted),
+      type: 'event', ownerId: event.id }], () => undefined);
+    return adopted;
+  }
+
+  async openEvent(clicked: CalendarEvent): Promise<string> {
     return this.serialized(async () => {
+      const event = await this.adoptOrphanNote(clicked);
       const path = await this.availableEventPath(event);
       if (event.sourceId === 'local' && await this.store.io.read(path) === null) {
         await this.store.commit([{ path, before: null, after: newEventNote(event, path), type: 'event', ownerId: event.id }], () => undefined);
@@ -384,7 +428,8 @@ export class EventNoteService {
 
   async reschedule(event: CalendarEvent, interval: Interval): Promise<CalendarEvent> {
     return this.serialized(async () => {
-      const updated = { ...event, ...interval, allDay: interval.allDay ?? event.allDay };
+      const adopted = await this.adoptOrphanNote(event);
+      const updated = { ...adopted, ...interval, allDay: interval.allDay ?? adopted.allDay };
       validateInterval(updated.start, updated.end, updated.allDay);
       const plan = await this.planEventWrites(updated, { addMissing: true });
       await this.store.commit(plan.writes, state => {
