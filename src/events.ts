@@ -279,19 +279,25 @@ export class EventNoteService {
     const dailyBefore = await this.store.io.read(dailyPath);
     const dailyBase = dailyBefore ?? await this.initialDaily(date);
     const bullet = eventBullet(event, notePath, settings.timeZone);
-    const previous = this.store.state.noteLinks[event.id];
-    let dailyAfter = dailyBase;
-    const writes: PlannedWrite[] = [];
+    let previous: NoteLink | undefined = this.store.state.noteLinks[event.id];
+    let previousContent: string | null = null;
     if (previous) {
       if (previous.pendingRename) throw new Error('Event Note rename is still settling; retry after its links update.');
-      if (previous.eventPath !== notePath) throw new Error('Event Note was moved; reindex before opening.');
+      const eventDeleted = await this.store.io.read(previous.eventPath) === null;
+      if (!eventDeleted && previous.eventPath !== notePath) throw new Error('Event Note was moved; reindex before opening.');
+      previousContent = pathKey(previous.dailyPath) === pathKey(dailyPath) ? dailyBefore : await this.store.io.read(previous.dailyPath);
+      // Deleting the Event Note or the tracked Daily Note discards the link,
+      // so the next open recreates the notes instead of demanding a relink.
+      if (previousContent === null || (eventDeleted && !hasTrackedBullet(previousContent, previous.bullet))) previous = undefined;
+    }
+    let dailyAfter = dailyBase;
+    const writes: PlannedWrite[] = [];
+    if (previous && previousContent !== null) {
       if (pathKey(previous.dailyPath) === pathKey(dailyPath)) {
         if (previous.bullet === bullet) {
           if (!hasTrackedBullet(dailyBase, bullet)) throw new Error('Tracked Daily Note entry was edited or moved; relink it before updating this event.');
         } else dailyAfter = removeTrackedBullet(dailyBase, previous.bullet);
       } else {
-        const previousContent = await this.store.io.read(previous.dailyPath);
-        if (previousContent === null) throw new Error('Tracked Daily Note was removed; relink this event.');
         writes.push({ path: previous.dailyPath, before: previousContent,
           after: removeTrackedBullet(previousContent, previous.bullet), type: 'daily' });
       }
@@ -346,7 +352,9 @@ export class EventNoteService {
   async updateLinkedInterval(event: CalendarEvent, interval: Interval): Promise<IntervalWritePlan> {
     const updated = { ...event, ...interval, allDay: interval.allDay ?? event.allDay };
     validateEventInterval(updated);
-    if (!this.store.state.noteLinks[event.id]) return { writes: [], event: updated };
+    const link = this.store.state.noteLinks[event.id];
+    // A deleted Event Note stays deleted until the user opens the event again.
+    if (!link || (!link.pendingRename && await this.store.io.read(link.eventPath) === null)) return { writes: [], event: updated };
     const plan = await this.planEventWrites(updated);
     return { writes: plan.writes, link: plan.link, event: updated };
   }

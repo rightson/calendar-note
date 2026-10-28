@@ -521,3 +521,40 @@ test('duplicate event_id blocks opening either note until ambiguity is resolved'
   await assert.rejects(service.openEvent(event), /Duplicate event_id/);
   assert.equal(io.files.get('Other.md'), io.files.get(first));
 });
+
+test('deleting the Daily Note and Event Note lets a later click recreate both', async () => {
+  const { io, service, store, opened } = setup();
+  const event = imported();
+  const cache = emptySourceCache();
+  cache.accepted[event.id] = { event, revision: 0 };
+  store.state.sourceCaches.work = cache;
+  await service.openEvent(event);
+  const link = store.state.noteLinks[event.id];
+  io.files.delete(link.eventPath);
+  io.files.delete(link.dailyPath);
+  assert.ok((await service.scanEvents()).some(item => item.id === event.id));
+  assert.equal(await service.openDaily('2026-10-22'), link.dailyPath);
+  assert.equal(await service.openEvent(event), link.eventPath);
+  assert.equal(io.files.get(link.dailyPath)!.split(link.bullet).length - 1, 1);
+  assert.match(io.files.get(link.eventPath)!, /event_id:/);
+  assert.deepEqual(opened.slice(-2), [link.dailyPath, link.eventPath]);
+});
+
+test('deleting only the Daily Note lets a later event click relink it', async () => {
+  const { io, service, store } = setup();
+  const event = await service.createLocal({ title: 'Roadmap', start, end });
+  const link = store.state.noteLinks[event.id];
+  io.files.delete(link.dailyPath);
+  await service.openEvent(event);
+  assert.equal(io.files.get(link.dailyPath)!.split(link.bullet).length - 1, 1);
+});
+
+test('a source update does not recreate a deleted Event Note', async () => {
+  const { io, service, store } = setup();
+  const event = imported();
+  await service.openEvent(event);
+  const link = store.state.noteLinks[event.id];
+  io.files.delete(link.eventPath);
+  const plan = await service.updateLinkedInterval(event, { start: '2026-10-23T10:00:00+08:00', end: '2026-10-23T11:00:00+08:00' });
+  assert.deepEqual(plan.writes, []);
+});
