@@ -243,15 +243,27 @@ test('local note properties remain compact and an edited body survives a cross-d
   assert.match(io.files.get(link.dailyPath)!, /\[\[Calendar Notes\/Review/);
 });
 
-test('edited tracked bullet blocks a move without changing the accepted note interval', async () => {
+test('moving an event whose entry the user rewrote keeps their text and adds a fresh entry', async () => {
   const { io, service, store } = setup();
   const event = await service.createLocal({ title: 'One', start, end });
   await service.openEvent(event);
   const link = store.state.noteLinks[event.id];
   io.files.set(link.dailyPath, io.files.get(link.dailyPath)!.replace(link.bullet, '- My edited entry'));
-  await assert.rejects(service.reschedule(event, { start: '2026-10-23T10:00:00+08:00', end: '2026-10-23T11:00:00+08:00' }), /relink/);
-  assert.match(io.files.get(link.eventPath)!, /2026-10-22T10:00:00/);
-  assert.equal(store.state.noteLinks[event.id].dailyPath, link.dailyPath);
+  await service.reschedule(event, { start: '2026-10-23T10:00:00+08:00', end: '2026-10-23T11:00:00+08:00' });
+  const moved = store.state.noteLinks[event.id];
+  assert.match(io.files.get(link.eventPath)!, /2026-10-23T10:00:00/);
+  assert.match(io.files.get(link.dailyPath)!, /- My edited entry/);
+  assert.notEqual(moved.dailyPath, link.dailyPath);
+  assert.equal(io.files.get(moved.dailyPath)!.split(moved.bullet).length - 1, 1);
+});
+
+test('saving the same times from the details dialog restores a removed entry', async () => {
+  const { io, service, store } = setup();
+  const event = await service.createLocal({ title: 'One', start, end });
+  const link = store.state.noteLinks[event.id];
+  io.files.set(link.dailyPath, io.files.get(link.dailyPath)!.replace(`${link.bullet}\n`, ''));
+  await service.reschedule(event, { start, end });
+  assert.equal(io.files.get(link.dailyPath)!.split(link.bullet).length - 1, 1);
 });
 
 test('different titles that normalize to the same path receive distinct files', async () => {
@@ -659,13 +671,13 @@ test('repeated generated entries for one event collapse to one; handwritten link
   assert.equal(io.files.get(link.dailyPath), `## Event\n\n${link.bullet}\n${own}\n\n## Event\n\n`);
 });
 
-test('a background move still asks for a relink when the user rewrote the entry', async () => {
+test('a background move leaves a rewritten entry and says how to restore it', async () => {
   const { io, service, store } = setup();
   const event = await service.createLocal({ title: 'Roadmap', start, end });
   const link = store.state.noteLinks[event.id];
   io.files.set(link.dailyPath, io.files.get(link.dailyPath)!.replace(link.bullet, '- Roadmap, moved to tomorrow'));
   const moved = { ...event, start: '2026-10-23T10:00:00+08:00', end: '2026-10-23T11:00:00+08:00' };
-  await assert.rejects(service.updateLinkedInterval(event, moved), /relink/);
+  await assert.rejects(service.updateLinkedInterval(event, moved), /Open the event from the calendar to add it again/);
   await service.openEvent(event);
   assert.match(io.files.get(link.dailyPath)!, /- Roadmap, moved to tomorrow\n[\s\S]*- 10:00–11:00 \[\[Calendar Notes\/Roadmap\|Roadmap\]\]/);
 });

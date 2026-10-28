@@ -315,10 +315,10 @@ export class EventNoteService {
       }
       const sameDaily = pathKey(previous.dailyPath) === pathKey(dailyPath);
       const previousContent = sameDaily ? dailyBefore : await this.store.io.read(previous.dailyPath);
-      // Background updates keep a user's rewritten entry and ask for a relink;
-      // opening the event adds a fresh entry. A deleted note restarts the link.
+      // Background updates leave a missing or rewritten entry for the user;
+      // anything the user does adds a fresh one. A deleted note restarts the link.
       if (!options.addMissing && !eventDeleted && previousContent !== null && !hasEventBullet(previousContent, notePaths)) {
-        throw new Error('Tracked Daily Note entry was edited or moved; relink it before updating this event.');
+        throw new Error('The Daily Note entry for this event was edited or removed. Open the event from the calendar to add it again.');
       }
       if (!sameDaily && previousContent !== null) {
         const cleaned = removeEventBullets(previousContent, notePaths);
@@ -386,7 +386,7 @@ export class EventNoteService {
     return this.serialized(async () => {
       const updated = { ...event, ...interval, allDay: interval.allDay ?? event.allDay };
       validateInterval(updated.start, updated.end, updated.allDay);
-      const plan = await this.planEventWrites(updated);
+      const plan = await this.planEventWrites(updated, { addMissing: true });
       await this.store.commit(plan.writes, state => {
         state.noteLinks[event.id] = plan.link;
         if (event.sourceId !== 'local') state.overrides[event.id] = { start: updated.start, end: updated.end, allDay: updated.allDay };
