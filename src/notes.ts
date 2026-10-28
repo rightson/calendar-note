@@ -174,7 +174,8 @@ function eventSection(content: string): { start: number; end: number } | null {
     const match = /^ {0,3}(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(line.text);
     return match ? [{ level: match[1].length, title: match[2], start: line.start, end: line.end }] : [];
   });
-  const current = headings.find(heading => heading.level === 2 && heading.title === 'Event');
+  // Daily Notes written before the rename keep their `## Event` section.
+  const current = headings.find(heading => heading.level === 2 && (heading.title === 'Events' || heading.title === 'Event'));
   if (!current) return null;
   return { start: current.end, end: headings.find(heading => heading.start > current.start && heading.level <= 2)?.start ?? content.length };
 }
@@ -225,8 +226,12 @@ export function addEventBullet(content: string, bullet: string): string {
   // code, so the entry would never be found and every open would add another.
   const fence = scanMarkdown(content).openFence;
   const close = fence && (!section || section.end === content.length) ? `${fence}\n` : '';
-  if (!section) return `${content}${content.endsWith('\n') ? '' : '\n'}${close}\n## Event\n\n${bullet}\n`;
-  const before = content.slice(0, section.end);
-  const after = content.slice(section.end);
-  return `${before}${before.endsWith('\n') ? '' : '\n'}${close}${bullet}\n${after ? '\n' : ''}${after}`;
+  if (!section) {
+    const text = `${content}${content.endsWith('\n') ? '' : '\n'}${close}`;
+    return `${text}${/(?:^|\n)\n$/.test(text) ? '' : '\n'}## Events\n${bullet}\n`;
+  }
+  // Follow the section's last non-blank line so entries stay contiguous.
+  const last = markdownLines(content).filter(line => line.start >= section.start && line.start < section.end && line.text.trim()).pop();
+  const before = content.slice(0, last?.end ?? section.start);
+  return `${before}${before.endsWith('\n') ? '' : '\n'}${close}${bullet}\n${content.slice(before.length)}`;
 }
