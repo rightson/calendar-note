@@ -283,7 +283,14 @@ export class EventNoteService {
     let previousContent: string | null = null;
     if (previous) {
       if (previous.pendingRename) throw new Error('Event Note rename is still settling; retry after its links update.');
-      const eventDeleted = await this.store.io.read(previous.eventPath) === null;
+      // The link is stale when no note at its path carries this event_id,
+      // e.g. it was deleted or Obsidian recreated an empty note from a link.
+      const linkedContent = previous.eventPath === notePath ? noteBefore : await this.store.io.read(previous.eventPath);
+      let eventDeleted = linkedContent === null;
+      if (!eventDeleted) {
+        try { eventDeleted = parseEventNote(linkedContent!, previous.eventPath)?.id !== event.id; }
+        catch { throw new Error(`Linked Event Note is invalid; fix it before opening: ${previous.eventPath}`); }
+      }
       if (!eventDeleted && previous.eventPath !== notePath) throw new Error('Event Note was moved; reindex before opening.');
       previousContent = pathKey(previous.dailyPath) === pathKey(dailyPath) ? dailyBefore : await this.store.io.read(previous.dailyPath);
       // Deleting the Event Note or the tracked Daily Note discards the link,
