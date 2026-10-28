@@ -23,6 +23,8 @@ This checklist covers a public plugin release. It does not submit the plugin to 
 
 Create a GitHub Release with tag `0.1.0`, matching `manifest.json`. Attach the three plugin assets as individual files at the release root: `main.js`, `manifest.json`, and `styles.css`. The downloadable ZIP may be attached as an extra convenience, but it does not replace those three assets. Use [the 0.1.0 release notes](../releases/0.1.0.md) as the release description.
 
+To publish from GitHub Actions instead, run the **Release** workflow (`.github/workflows/release.yml`) on `main` after the version bump and release notes are merged. It checks that `manifest.json`, `package.json`, and `versions.json` agree and that `docs/releases/<version>.md` exists, runs the type check, tests, and package build, then creates the annotated tag and the GitHub Release with `main.js`, `manifest.json`, `styles.css`, and the ZIP attached. Re-running it for a version that is already released changes nothing.
+
 The official Obsidian guide requires the release tag to match the manifest version and lists `main.js`, `manifest.json`, and `styles.css` as release attachments: [Submit your plugin](https://docs.obsidian.md/Plugins/Releasing/Submit%20your%20plugin).
 
 ## Community directory submission
