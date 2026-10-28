@@ -558,3 +558,39 @@ test('a source update does not recreate a deleted Event Note', async () => {
   const plan = await service.updateLinkedInterval(event, { start: '2026-10-23T10:00:00+08:00', end: '2026-10-23T11:00:00+08:00' });
   assert.deepEqual(plan.writes, []);
 });
+
+test('a deleted renamed Event Note is recreated instead of reported as moved', async () => {
+  const { io, service, store } = setup();
+  const event = imported();
+  await service.openEvent(event);
+  const original = store.state.noteLinks[event.id];
+  const renamed = original.eventPath.replace(/[^/]+\.md$/, 'Renamed.md');
+  io.files.set(renamed, io.files.get(original.eventPath)!);
+  io.files.delete(original.eventPath);
+  await service.handleRename({ path: renamed, extension: 'md' } as never, original.eventPath);
+  await service.finalizePendingRenames(renamed);
+  const link = store.state.noteLinks[event.id];
+  io.files.delete(link.eventPath);
+  io.files.delete(link.dailyPath);
+  const path = await service.openEvent(event);
+  assert.equal(path, original.eventPath);
+  assert.equal(io.files.get(link.dailyPath)!.split('[[').length - 1, 1);
+});
+
+test('an unrelated note at the deleted Event Note path does not block recreation', async () => {
+  const { io, service, store } = setup();
+  const event = imported();
+  await service.openEvent(event);
+  const original = store.state.noteLinks[event.id];
+  const renamed = original.eventPath.replace(/[^/]+\.md$/, 'Renamed.md');
+  io.files.set(renamed, io.files.get(original.eventPath)!);
+  io.files.delete(original.eventPath);
+  await service.handleRename({ path: renamed, extension: 'md' } as never, original.eventPath);
+  await service.finalizePendingRenames(renamed);
+  const link = store.state.noteLinks[event.id];
+  io.files.set(link.eventPath, '# Something else\n');
+  delete store.state.pathTypes[link.eventPath.toLocaleLowerCase('en-US')];
+  const path = await service.openEvent(event);
+  assert.equal(path, original.eventPath);
+  assert.equal(io.files.get(link.eventPath), '# Something else\n');
+});
