@@ -805,3 +805,38 @@ test('notes of a still-configured subscription are never adopted by another one'
   assert.notEqual(second, path);
   assert.equal(parseEventNote(io.files.get(path)!, path)?.id, old.id);
 });
+
+test('a scan reconnects a removed subscription note without a click and explains leftover copies', async () => {
+  const { io, service, store, old, current, resubscribe } = resubscribed();
+  const path = await service.openEvent(old);
+  const copy = 'Calendar Notes/FW Meeting 1.md';
+  io.files.set(copy, io.files.get(path)!);
+  delete store.state.sourceCaches.old;
+  resubscribe();
+  store.state.sourceCaches.new = { ...emptySourceCache(), accepted: { [current.id]: { event: current, revision: 0 } } };
+  await service.scanEvents();
+  assert.equal(parseEventNote(io.files.get(path)!, path)?.id, current.id);
+  assert.deepEqual(service.diagnostics, [`${copy}: Created by a calendar subscription that was removed; ${path} now holds this event. Delete this copy or merge it into that note.`]);
+  const scanned = await service.scanEvents();
+  assert.equal(scanned.find(event => event.id === current.id)?.title, 'FW: Meeting');
+  assert.equal(service.diagnostics.length, 1);
+});
+
+test('scan diagnostics say why an imported note is not shown', async () => {
+  const { io, service, store, old, resubscribe } = resubscribed();
+  const path = await service.openEvent(old);
+  io.files.set('Calendar Notes/Copy.md', io.files.get(path)!);
+  store.state.sourceCaches.old = { ...emptySourceCache(), accepted: {} };
+  await service.scanEvents();
+  assert.deepEqual(service.diagnostics.sort(), [
+    `Calendar Notes/Copy.md: Has the same event_id as ${path}, so both are skipped. Delete or merge one of them.`,
+    `${path}: Calendar "Work" does not list this event. It may have been deleted from the calendar, or the note's event_id, ical_uid or recurrence_id was edited.`,
+  ]);
+  io.files.delete('Calendar Notes/Copy.md');
+  await service.scanEvents();
+  assert.deepEqual(service.diagnostics, [`${path}: Calendar "Work" does not list this event. It may have been deleted from the calendar, or the note's event_id, ical_uid or recurrence_id was edited.`]);
+  resubscribe();
+  delete store.state.sourceCaches.old;
+  await service.scanEvents();
+  assert.deepEqual(service.diagnostics, [`${path}: Created by a calendar subscription that was removed, and no current calendar lists this event. Delete the note if you no longer need it.`]);
+});

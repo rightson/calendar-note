@@ -34,6 +34,8 @@ function sameEffectiveInterval(note: { start: string; end: string; allDay: boole
   return Date.parse(note.start) === Date.parse(source.start) && Date.parse(note.end) === Date.parse(source.end);
 }
 
+interface Orphan { path: string; uid: string; recurrenceId?: string }
+
 export class EventNoteService {
   public diagnostics: string[] = [];
   private queue: Promise<unknown> = Promise.resolve();
@@ -140,6 +142,8 @@ export class EventNoteService {
     const validIds = new Set<string>();
     const diagnostics: string[] = [];
     const overrides = { ...this.store.state.overrides };
+    const configured = new Set(this.getSettings().sources.map(source => source.id));
+    const orphans: Orphan[] = [];
     const markdownPaths = await this.store.io.listMarkdown();
     for (const remembered of this.lastValid.keys()) if (!markdownPaths.includes(remembered)) this.lastValid.delete(remembered);
     for (const path of markdownPaths) {
@@ -153,9 +157,16 @@ export class EventNoteService {
       try {
         const note = parseEventNote(content, path);
         if (!note) continue;
-        if (!note.id.trim() || paths.has(note.id)) {
-          diagnostics.push(`Duplicate or missing event_id in ${path}; the note was skipped.`);
-          if (note.id) { ambiguous.add(note.id); events.delete(note.id); validIds.delete(note.id); }
+        // Reconnected after this loop, together with any copies of the same note.
+        if (note.source && note.uid && !note.id.startsWith('local|') && !configured.has(note.source)
+          && !this.store.state.sourceCaches[note.source]?.accepted[note.id]) {
+          orphans.push({ path, uid: note.uid, recurrenceId: note.recurrenceId });
+          continue;
+        }
+        if (!note.id.trim()) { diagnostics.push(`${path}: The event_id is empty; the note was skipped.`); continue; }
+        if (paths.has(note.id)) {
+          diagnostics.push(`${path}: Has the same event_id as ${paths.get(note.id)}, so both are skipped. Delete or merge one of them.`);
+          ambiguous.add(note.id); events.delete(note.id); validIds.delete(note.id);
           continue;
         }
         paths.set(note.id, path);
@@ -169,7 +180,9 @@ export class EventNoteService {
           if (!note.source || !note.uid) { diagnostics.push(`Imported Event Note lacks source identity in ${path}.`); continue; }
           const accepted = this.store.state.sourceCaches[note.source]?.accepted[note.id]?.event;
           if (!accepted || accepted.uid !== note.uid || accepted.recurrenceId !== note.recurrenceId) {
-            diagnostics.push(`Imported Event Note identity needs review in ${path}.`); continue;
+            const name = this.getSettings().sources.find(source => source.id === note.source)?.name ?? note.source;
+            diagnostics.push(`${path}: Calendar "${name}" does not list this event. It may have been deleted from the calendar, or the note's event_id, ical_uid or recurrence_id was edited.`);
+            continue;
           }
           const difference = !sameEffectiveInterval(note, accepted);
           // A changed note interval is a user override, so it keeps the editing minimum.
@@ -187,6 +200,7 @@ export class EventNoteService {
       }
     }
     for (const id of ambiguous) events.delete(id);
+    await this.reconnectOrphans(orphans, configured, diagnostics);
     this.diagnostics = diagnostics;
     for (const [id, currentPath] of paths) {
       const linked = this.store.state.noteLinks[id];
@@ -233,6 +247,42 @@ export class EventNoteService {
       }
     }
     return [...events.values()];
+  }
+
+  /**
+   * A removed subscription's notes are reconnected when exactly one current
+   * calendar lists the same iCal event; the next scan then reads them as valid.
+   */
+  private async reconnectOrphans(orphans: Orphan[], configured: Set<string>, diagnostics: string[]): Promise<void> {
+    const groups = new Map<string, Orphan[]>();
+    for (const orphan of orphans) {
+      const key = JSON.stringify([orphan.uid, orphan.recurrenceId ?? null]);
+      groups.set(key, [...groups.get(key) ?? [], orphan]);
+    }
+    const removed = 'Created by a calendar subscription that was removed';
+    for (const group of groups.values()) {
+      const { uid, recurrenceId } = group[0];
+      const matches = Object.entries(this.store.state.sourceCaches).filter(([id]) => configured.has(id))
+        .flatMap(([, cache]) => Object.values(cache.accepted).map(item => item.event))
+        .filter(event => event.uid === uid && event.recurrenceId === recurrenceId);
+      if (matches.length !== 1) {
+        const reason = matches.length ? 'more than one current calendar lists this event' : 'no current calendar lists this event';
+        for (const { path } of group) diagnostics.push(`${path}: ${removed}, and ${reason}. Delete the note if you no longer need it.`);
+        continue;
+      }
+      try {
+        let owner = await this.findEventPath(matches[0].id);
+        if (!owner) {
+          await this.serialized(() => this.adoptOrphanNote(matches[0]));
+          owner = await this.findEventPath(matches[0].id);
+        }
+        for (const { path } of group) {
+          if (path !== owner) diagnostics.push(`${path}: ${removed}; ${owner} now holds this event. Delete this copy or merge it into that note.`);
+        }
+      } catch (error) {
+        diagnostics.push(error instanceof Error ? error.message : `${group.map(item => item.path).join(', ')}: ${removed}.`);
+      }
+    }
   }
 
   async indexLocal(): Promise<CalendarEvent[]> { return (await this.scanEvents()).filter(event => event.sourceId === 'local'); }
