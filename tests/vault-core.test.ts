@@ -626,3 +626,15 @@ test('an unrelated note at the deleted Event Note path does not block recreation
   assert.equal(path, original.eventPath);
   assert.equal(io.files.get(link.eventPath), '# Something else\n');
 });
+
+test('a linked Event Note that the Markdown listing misses still opens at its linked path', async () => {
+  const { io, service, store } = setup();
+  const event = imported();
+  await service.openEvent(event);
+  const link = store.state.noteLinks[event.id];
+  const listMarkdown = io.listMarkdown.bind(io);
+  io.listMarkdown = async () => (await listMarkdown()).filter(path => path !== link.eventPath);
+  store.state.settings.eventPattern = 'Elsewhere/{title}';
+  assert.equal(await service.openEvent(event), link.eventPath);
+  assert.equal(store.state.noteLinks[event.id].eventPath, link.eventPath);
+});

@@ -62,6 +62,13 @@ export class EventNoteService {
 
   private async availableEventPath(event: CalendarEvent): Promise<string> {
     const previous = await this.findEventPath(event.id);
+    // The linked path is authoritative while it still holds this event's note.
+    const linked = this.store.state.noteLinks[event.id]?.eventPath;
+    const linkedContent = linked ? await this.store.io.read(linked) : null;
+    if (linked && linkedContent) {
+      try { if (parseEventNote(linkedContent, linked)?.id === event.id) return linked; }
+      catch { /* an invalid linked note is reported by planEventWrites */ }
+    }
     if (previous) return previous;
     const settings = this.getSettings();
     const sourceName = settings.sources.find(source => source.id === event.sourceId)?.name ?? (event.sourceId === 'local' ? 'Local' : event.sourceId);
@@ -291,7 +298,6 @@ export class EventNoteService {
         try { eventDeleted = parseEventNote(linkedContent!, previous.eventPath)?.id !== event.id; }
         catch { throw new Error(`Linked Event Note is invalid; fix it before opening: ${previous.eventPath}`); }
       }
-      if (!eventDeleted && previous.eventPath !== notePath) throw new Error('Event Note was moved; reindex before opening.');
       previousContent = pathKey(previous.dailyPath) === pathKey(dailyPath) ? dailyBefore : await this.store.io.read(previous.dailyPath);
       // Deleting the Event Note or the tracked Daily Note discards the link,
       // so the next open recreates the notes instead of demanding a relink.
