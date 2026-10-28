@@ -5,7 +5,7 @@ import { resolveDailySettings, resolveWeeklySettings, resolveWeekRules } from '.
 import { pathKey, type NoteLink } from './state';
 import { CalendarStore, type PlannedWrite } from './store';
 import type { CalendarEvent, Interval, PluginSettings } from './types';
-import { addEventBullet, eventBullet, hasTrackedBullet, newEventNote, parseEventNote, removeDuplicateEventNoteTitle, removeTrackedBullet, replaceRenamedBullet, validateEventInterval, validateInterval, writeEventFrontmatter } from './notes';
+import { eventBullet, hasEventBullet, newEventNote, parseEventNote, removeDuplicateEventNoteTitle, removeEventBullets, upsertEventBullet, validateEventInterval, validateInterval, writeEventFrontmatter } from './notes';
 
 export interface EventWritePlan {
   writes: PlannedWrite[];
@@ -198,8 +198,20 @@ export class EventNoteService {
       const desiredBullet = eventBullet(event, link.eventPath, this.getSettings().timeZone);
       if (pathKey(desiredDaily) !== pathKey(link.dailyPath) || desiredBullet !== link.bullet) {
         try {
-          const plan = await this.planEventWrites(event);
-          await this.store.commit(plan.writes, state => { state.noteLinks[event.id] = plan.link; });
+          // Queue with clicks and moves: a plan made beside another write
+          // would commit a link that no longer matches the Daily Note.
+          await this.serialized(async () => {
+            const current = this.store.state.noteLinks[event.id];
+            if (!current || current.pendingRename) return;
+            // A note edited since this scan read it is left to the next scan.
+            const content = await this.store.io.read(current.eventPath);
+            let note: ReturnType<typeof parseEventNote> = null;
+            try { note = content === null ? null : parseEventNote(content, current.eventPath); }
+            catch { return; }
+            if (!note || note.title !== event.title || note.start !== event.start || note.end !== event.end || note.allDay !== event.allDay) return;
+            const plan = await this.planEventWrites(event);
+            await this.store.commit(plan.writes, state => { state.noteLinks[event.id] = plan.link; });
+          });
         } catch (error) {
           diagnostics.push(`${link.dailyPath}: ${error instanceof Error ? error.message : 'Could not update linked Daily Note.'}`);
         }
@@ -246,7 +258,7 @@ export class EventNoteService {
       const path = await this.availableEventPath(event);
       await this.store.commit([{ path, before: null, after: newEventNote(event, path), type: 'event', ownerId: event.id }], () => undefined);
       try {
-        const plan = await this.planEventWrites(event);
+        const plan = await this.planEventWrites(event, { addMissing: true });
         await this.store.commit(plan.writes, state => { state.noteLinks[event.id] = plan.link; });
       } catch (error) {
         const reason = error instanceof Error ? error.message : 'Unknown Daily Note error.';
@@ -256,7 +268,7 @@ export class EventNoteService {
     });
   }
 
-  async planEventWrites(event: CalendarEvent): Promise<EventWritePlan> {
+  async planEventWrites(event: CalendarEvent, options: { addMissing?: boolean } = {}): Promise<EventWritePlan> {
     validateEventInterval(event);
     const settings = this.getSettings();
     const notePath = await this.availableEventPath(event);
@@ -279,8 +291,11 @@ export class EventNoteService {
     const dailyBefore = await this.store.io.read(dailyPath);
     const dailyBase = dailyBefore ?? await this.initialDaily(date);
     const bullet = eventBullet(event, notePath, settings.timeZone);
-    let previous: NoteLink | undefined = this.store.state.noteLinks[event.id];
-    let previousContent: string | null = null;
+    const previous: NoteLink | undefined = this.store.state.noteLinks[event.id];
+    const writes: PlannedWrite[] = [];
+    // An entry is this event's when it keeps the generated form and links to
+    // its Event Note, so a stale alias, time or position is rewritten in place.
+    const notePaths = previous ? [notePath, previous.eventPath] : [notePath];
     if (previous) {
       if (previous.pendingRename) throw new Error('Event Note rename is still settling; retry after its links update.');
       // The link is stale when no note at its path carries this event_id,
@@ -292,24 +307,19 @@ export class EventNoteService {
         catch { throw new Error(`Linked Event Note is invalid; fix it before opening: ${previous.eventPath}`); }
       }
       if (!eventDeleted && previous.eventPath !== notePath) throw new Error('Event Note was moved; reindex before opening.');
-      previousContent = pathKey(previous.dailyPath) === pathKey(dailyPath) ? dailyBefore : await this.store.io.read(previous.dailyPath);
-      // Deleting the Event Note or the tracked Daily Note discards the link,
-      // so the next open recreates the notes instead of demanding a relink.
-      if (previousContent === null || (eventDeleted && !hasTrackedBullet(previousContent, previous.bullet))) previous = undefined;
-    }
-    let dailyAfter = dailyBase;
-    const writes: PlannedWrite[] = [];
-    if (previous && previousContent !== null) {
-      if (pathKey(previous.dailyPath) === pathKey(dailyPath)) {
-        if (previous.bullet === bullet) {
-          if (!hasTrackedBullet(dailyBase, bullet)) throw new Error('Tracked Daily Note entry was edited or moved; relink it before updating this event.');
-        } else dailyAfter = removeTrackedBullet(dailyBase, previous.bullet);
-      } else {
-        writes.push({ path: previous.dailyPath, before: previousContent,
-          after: removeTrackedBullet(previousContent, previous.bullet), type: 'daily' });
+      const sameDaily = pathKey(previous.dailyPath) === pathKey(dailyPath);
+      const previousContent = sameDaily ? dailyBefore : await this.store.io.read(previous.dailyPath);
+      // Background updates keep a user's rewritten entry and ask for a relink;
+      // opening the event adds a fresh entry. A deleted note restarts the link.
+      if (!options.addMissing && !eventDeleted && previousContent !== null && !hasEventBullet(previousContent, notePaths)) {
+        throw new Error('Tracked Daily Note entry was edited or moved; relink it before updating this event.');
+      }
+      if (!sameDaily && previousContent !== null) {
+        const cleaned = removeEventBullets(previousContent, notePaths);
+        if (cleaned !== previousContent) writes.push({ path: previous.dailyPath, before: previousContent, after: cleaned, type: 'daily' });
       }
     }
-    if (!(previous && pathKey(previous.dailyPath) === pathKey(dailyPath) && previous.bullet === bullet)) dailyAfter = addEventBullet(dailyAfter, bullet);
+    const dailyAfter = upsertEventBullet(dailyBase, bullet, notePaths);
     if (noteAfter !== noteBefore) writes.push({ path: notePath, before: noteBefore, after: noteAfter, type: 'event', ownerId: event.id });
     if (dailyAfter !== dailyBefore) writes.push({ path: dailyPath, before: dailyBefore, after: dailyAfter, type: 'daily' });
     const link = { eventPath: notePath, dailyPath, bullet };
@@ -322,7 +332,7 @@ export class EventNoteService {
       if (event.sourceId === 'local' && await this.store.io.read(path) === null) {
         await this.store.commit([{ path, before: null, after: newEventNote(event, path), type: 'event', ownerId: event.id }], () => undefined);
       }
-      const plan = await this.planEventWrites(event);
+      const plan = await this.planEventWrites(event, { addMissing: true });
       await this.store.commit(plan.writes, state => { state.noteLinks[event.id] = plan.link; });
       await this.openPath(plan.notePath);
       return plan.notePath;
@@ -420,13 +430,15 @@ export class EventNoteService {
         if (!pending || (newPath && pathKey(pending.newPath) !== pathKey(newPath))) continue;
         const noteContent = await this.store.io.read(pending.newPath);
         const dailyBefore = await this.store.io.read(link.dailyPath);
-        if (noteContent === null || dailyBefore === null) throw new Error('Renamed Event Note or tracked Daily Note is missing; relink this event.');
+        if (noteContent === null) throw new Error('Renamed Event Note is missing; relink this event.');
         const note = parseEventNote(noteContent, pending.newPath);
         if (!note || note.id !== id) throw new Error('Renamed Event Note identity changed; relink it before updating its Daily Note.');
         const event: CalendarEvent = { id, sourceId: note.source ?? 'local', uid: note.uid ?? id.slice(6),
           title: note.title, start: note.start, end: note.end, allDay: note.allDay };
         const bullet = eventBullet(event, pending.newPath, this.getSettings().timeZone);
-        const dailyAfter = replaceRenamedBullet(dailyBefore, link.bullet, bullet, pending.newPath);
+        // Settle even when the entry is gone; the next open re-adds it.
+        const notePaths = [pending.newPath, pending.oldPath];
+        const dailyAfter = dailyBefore !== null && hasEventBullet(dailyBefore, notePaths) ? upsertEventBullet(dailyBefore, bullet, notePaths) : dailyBefore;
         const writes: PlannedWrite[] = dailyAfter === dailyBefore ? [] : [{ path: link.dailyPath, before: dailyBefore, after: dailyAfter, type: 'daily' }];
         await this.store.commit(writes, state => {
           const settled = state.noteLinks[id];

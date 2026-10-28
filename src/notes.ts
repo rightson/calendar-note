@@ -184,38 +184,38 @@ function trackedLine(content: string, bullet: string): Line | undefined {
   return section ? markdownLines(content).find(line => line.plain && line.start >= section.start && line.start < section.end && line.text === bullet) : undefined;
 }
 
-export function hasTrackedBullet(content: string, bullet: string): boolean {
-  return Boolean(trackedLine(content, bullet));
-}
+// Times exactly as eventBullet writes them, so a user's own wording is never matched.
+const generatedTime = /^(?:All day|\d\d:\d\d(?:–(?:\d{4}-\d\d-\d\d )?\d\d:\d\d)?)$/;
 
-/** Accept only the exact old bullet or Obsidian's expected rewritten link. */
-export function replaceRenamedBullet(content: string, previous: string, desired: string, newPath: string): string {
-  const section = eventSection(content);
-  if (!section) throw new Error('Tracked Daily Note entry was edited or moved; relink it before updating this event.');
-  const lines = markdownLines(content).filter(line => line.plain && line.start >= section.start && line.start < section.end);
-  const prefix = previous.slice(0, previous.indexOf('[['));
-  const previousAlias = /\|([^\]]+)\]\]$/.exec(previous)?.[1];
-  const desiredAlias = /\|([^\]]+)\]\]$/.exec(desired)?.[1];
-  const fullTarget = newPath.replace(/\.md$/i, '');
-  const basename = fullTarget.split('/').pop()!;
-  const candidates = lines.filter(item => {
-    if (item.text === previous || item.text === desired) return true;
-    if (!item.text.startsWith(prefix)) return false;
-    const link = /^\[\[([^|\]]+)(?:\|([^\]]+))?\]\]$/.exec(item.text.slice(prefix.length));
-    return !!link && [fullTarget, basename].includes(link[1].replace(/\.md$/i, ''))
-      && (!link[2] || [previousAlias, desiredAlias, basename].includes(link[2]));
+/** Generated entries linking to any of these Event Note paths, whatever their alias or time. */
+function eventBulletLines(content: string, notePaths: string[]): Line[] {
+  const key = (path: string) => path.replace(/\.md$/i, '').normalize('NFC').toLocaleLowerCase('en-US');
+  const targets = notePaths.map(key);
+  // Obsidian writes a bare basename only while it is unique in the Vault.
+  const basenames = targets.map(target => target.split('/').pop());
+  return markdownLines(content).filter(line => {
+    const match = line.plain ? /^- (.+?) \[\[([^|\]]+)(?:\|[^\]]*)?\]\]$/.exec(line.text) : null;
+    if (!match || !generatedTime.test(match[1])) return false;
+    const target = key(match[2]);
+    return targets.includes(target) || (!target.includes('/') && basenames.includes(target));
   });
-  if (candidates.length !== 1) throw new Error('Tracked Daily Note entry was edited or moved; relink it before updating this event.');
-  const line = candidates[0];
-  if (line.text === desired) return content;
-  const terminator = content.slice(line.start + line.text.length, line.end);
-  return content.slice(0, line.start) + desired + terminator + content.slice(line.end);
 }
 
-export function removeTrackedBullet(content: string, bullet: string): string {
-  const line = trackedLine(content, bullet);
-  if (!line) throw new Error('Tracked Daily Note entry was edited or moved; relink it before updating this event.');
-  return content.slice(0, line.start) + content.slice(line.end);
+export function hasEventBullet(content: string, notePaths: string[]): boolean {
+  return eventBulletLines(content, notePaths).length > 0;
+}
+
+export function removeEventBullets(content: string, notePaths: string[]): string {
+  return eventBulletLines(content, notePaths).reverse()
+    .reduce((text, line) => text.slice(0, line.start) + text.slice(line.end), content);
+}
+
+/** Rewrite this event's first generated entry in place and drop repeats; add one when none exists. */
+export function upsertEventBullet(content: string, bullet: string, notePaths: string[]): string {
+  const [first, ...repeats] = eventBulletLines(content, notePaths);
+  if (!first) return addEventBullet(content, bullet);
+  const text = repeats.reverse().reduce((result, line) => result.slice(0, line.start) + result.slice(line.end), content);
+  return text.slice(0, first.start) + bullet + text.slice(first.start + first.text.length);
 }
 
 export function addEventBullet(content: string, bullet: string): string {
