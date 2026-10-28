@@ -1,4 +1,4 @@
-import { Modal, Notice, Setting } from 'obsidian';
+import { Modal, Notice, Setting, SuggestModal, type App } from 'obsidian';
 import moment from 'moment-timezone';
 import type { CalendarEvent, Interval, PluginSettings } from './types';
 import type { ChangeHistoryEntry } from './history';
@@ -150,5 +150,35 @@ export class ChangeHistoryModal extends Modal {
     if (entry.status === 'local_override' && this.actions.canUseLatest(entry)) action('Use latest source times', async () => {
       if (!await this.actions.useLatest(entry)) new Notice('The latest source times are unavailable.');
     });
+  }
+}
+
+/** Picks which of several Event Notes left by a removed calendar keeps the clicked event. */
+export class NoteChoiceModal extends SuggestModal<string> {
+  private chosen?: string;
+  private resolve?: (path: string | undefined) => void;
+
+  constructor(app: App, private readonly paths: string[]) {
+    super(app);
+    this.setPlaceholder('Several notes match this event. Choose the one to keep');
+  }
+
+  choose(): Promise<string | undefined> {
+    return new Promise(resolve => { this.resolve = resolve; this.open(); });
+  }
+
+  getSuggestions(query: string): string[] {
+    const text = query.toLowerCase();
+    return this.paths.filter(path => path.toLowerCase().includes(text));
+  }
+
+  renderSuggestion(path: string, el: HTMLElement): void { el.setText(path); }
+
+  onChooseSuggestion(path: string): void { this.chosen = path; }
+
+  onClose(): void {
+    super.onClose();
+    // Obsidian closes the modal before it reports the chosen suggestion.
+    window.setTimeout(() => this.resolve?.(this.chosen), 0);
   }
 }

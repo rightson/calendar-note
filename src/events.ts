@@ -36,6 +36,9 @@ function sameEffectiveInterval(note: { start: string; end: string; allDay: boole
 
 interface Orphan { path: string; uid: string; recurrenceId?: string }
 
+/** Asks the user which of several matching Event Notes keeps the event; undefined when cancelled. */
+export type ChooseNote = (paths: string[]) => Promise<string | undefined>;
+
 export class EventNoteService {
   public diagnostics: string[] = [];
   private queue: Promise<unknown> = Promise.resolve();
@@ -387,7 +390,7 @@ export class EventNoteService {
    * their Event Notes no longer match. Take over the note the removed calendar
    * left for the same iCal event instead of creating a duplicate beside it.
    */
-  private async adoptOrphanNote(event: CalendarEvent): Promise<CalendarEvent> {
+  private async adoptOrphanNote(event: CalendarEvent, choose?: ChooseNote): Promise<CalendarEvent> {
     if (event.sourceId === 'local' || await this.findEventPath(event.id)) return event;
     const configured = new Set(this.getSettings().sources.map(source => source.id));
     const orphans: { path: string; content: string; id: string }[] = [];
@@ -402,8 +405,7 @@ export class EventNoteService {
       }
     }
     if (!orphans.length) return event;
-    const linked = orphans.filter(orphan => this.store.state.noteLinks[orphan.id]?.eventPath === orphan.path);
-    const chosen = orphans.length === 1 ? orphans[0] : linked.length === 1 ? linked[0] : undefined;
+    const chosen = orphans.length === 1 ? orphans[0] : await this.preferredOrphan(event, orphans, choose);
     if (!chosen) {
       throw new Error(`Several Event Notes from a removed calendar match this event: ${orphans.map(orphan => orphan.path).join(', ')}. Delete or merge the extra notes, then open the event again.`);
     }
@@ -425,9 +427,28 @@ export class EventNoteService {
     return adopted;
   }
 
-  async openEvent(clicked: CalendarEvent): Promise<string> {
+  /** The copy the old link or a Daily entry points to; otherwise the one the user picks. */
+  private async preferredOrphan<T extends { path: string; id: string }>(event: CalendarEvent, orphans: T[], choose?: ChooseNote): Promise<T | undefined> {
+    const linked = orphans.filter(orphan => this.store.state.noteLinks[orphan.id]?.eventPath === orphan.path);
+    if (linked.length === 1) return linked[0];
+    const settings = this.getSettings();
+    const dailyPaths = new Set([dailyNotePath(eventCalendarDate(event, settings.timeZone), this.app, settings),
+      ...orphans.map(orphan => this.store.state.noteLinks[orphan.id]?.dailyPath).filter((path): path is string => !!path)]);
+    const listed = new Set<T>();
+    for (const dailyPath of dailyPaths) {
+      const content = await this.store.io.read(dailyPath);
+      if (content !== null) for (const orphan of orphans) if (hasEventBullet(content, [orphan.path])) listed.add(orphan);
+    }
+    if (listed.size === 1) return [...listed][0];
+    if (!choose) return undefined;
+    const path = await choose(orphans.map(orphan => orphan.path));
+    if (path === undefined) throw new Error('No Event Note was chosen, so the event was not opened.');
+    return orphans.find(orphan => orphan.path === path);
+  }
+
+  async openEvent(clicked: CalendarEvent, choose?: ChooseNote): Promise<string> {
     return this.serialized(async () => {
-      const event = await this.adoptOrphanNote(clicked);
+      const event = await this.adoptOrphanNote(clicked, choose);
       const path = await this.availableEventPath(event);
       if (event.sourceId === 'local' && await this.store.io.read(path) === null) {
         await this.store.commit([{ path, before: null, after: newEventNote(event, path), type: 'event', ownerId: event.id }], () => undefined);

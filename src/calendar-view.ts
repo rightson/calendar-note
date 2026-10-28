@@ -11,7 +11,7 @@ import { dateAt, weekInfo } from './date';
 import { resolveWeekRules } from './settings';
 import type { CalendarEvent, Interval, PluginSettings } from './types';
 import type CalendarNotePlugin from './main';
-import { EventModal } from './modals';
+import { EventModal, NoteChoiceModal } from './modals';
 import { visibleMonthCount } from './calendar-layout';
 import { sidebarWidthForContainer, resizeSidebarWithKeyboard } from './sidebar-layout';
 import { subscriptionFailureMessage } from './subscription-settings';
@@ -512,7 +512,7 @@ export class CalendarNoteView extends ItemView {
     arg.jsEvent.preventDefault();
     if (Date.now() - this.lastDragAt < 600) return;
     const event = this.plugin.eventById(arg.event.id);
-    if (event) void this.plugin.runAction(() => this.plugin.notes.openEvent(event));
+    if (event) void this.plugin.runAction(() => this.plugin.notes.openEvent(event, paths => new NoteChoiceModal(this.app, paths).choose()));
   }
   private async handleMove(arg: EventDropArg | EventResizeDoneArg): Promise<void> {
     this.lastDragAt = Date.now();
