@@ -789,6 +789,8 @@ test('several notes from a removed subscription: the linked one is reused, other
   const other = resubscribed();
   const otherPath = await other.service.openEvent(other.old);
   other.io.files.set(copy, other.io.files.get(otherPath)!);
+  const otherLink = other.store.state.noteLinks[other.old.id];
+  other.io.files.set(otherLink.dailyPath, other.io.files.get(otherLink.dailyPath)!.replace(`${otherLink.bullet}\n`, ''));
   delete other.store.state.noteLinks[other.old.id];
   other.resubscribe();
   await assert.rejects(other.service.openEvent(other.current), /Several Event Notes from a removed calendar.*FW Meeting\.md.*FW Meeting 1\.md/);
@@ -804,4 +806,71 @@ test('notes of a still-configured subscription are never adopted by another one'
   const second = await service.openEvent(sibling);
   assert.notEqual(second, path);
   assert.equal(parseEventNote(io.files.get(path)!, path)?.id, old.id);
+});
+
+test('a scan reconnects a removed subscription note without a click and explains leftover copies', async () => {
+  const { io, service, store, old, current, resubscribe } = resubscribed();
+  const path = await service.openEvent(old);
+  const copy = 'Calendar Notes/FW Meeting 1.md';
+  io.files.set(copy, io.files.get(path)!);
+  delete store.state.sourceCaches.old;
+  resubscribe();
+  store.state.sourceCaches.new = { ...emptySourceCache(), accepted: { [current.id]: { event: current, revision: 0 } } };
+  await service.scanEvents();
+  assert.equal(parseEventNote(io.files.get(path)!, path)?.id, current.id);
+  assert.deepEqual(service.diagnostics, [`${copy}: Created by a calendar subscription that was removed; ${path} now holds this event. Delete this copy or merge it into that note.`]);
+  const scanned = await service.scanEvents();
+  assert.equal(scanned.find(event => event.id === current.id)?.title, 'FW: Meeting');
+  assert.equal(service.diagnostics.length, 1);
+});
+
+test('scan diagnostics say why an imported note is not shown', async () => {
+  const { io, service, store, old, resubscribe } = resubscribed();
+  const path = await service.openEvent(old);
+  io.files.set('Calendar Notes/Copy.md', io.files.get(path)!);
+  store.state.sourceCaches.old = { ...emptySourceCache(), accepted: {} };
+  await service.scanEvents();
+  assert.deepEqual(service.diagnostics.sort(), [
+    `Calendar Notes/Copy.md: Has the same event_id as ${path}, so both are skipped. Delete or merge one of them.`,
+    `${path}: Calendar "Work" does not list this event. It may have been deleted from the calendar, or the note's event_id, ical_uid or recurrence_id was edited.`,
+  ]);
+  io.files.delete('Calendar Notes/Copy.md');
+  await service.scanEvents();
+  assert.deepEqual(service.diagnostics, [`${path}: Calendar "Work" does not list this event. It may have been deleted from the calendar, or the note's event_id, ical_uid or recurrence_id was edited.`]);
+  resubscribe();
+  delete store.state.sourceCaches.old;
+  await service.scanEvents();
+  assert.deepEqual(service.diagnostics, [`${path}: Created by a calendar subscription that was removed, and no current calendar lists this event. Delete the note if you no longer need it.`]);
+});
+
+test('with no old link, the copy the Daily Note lists keeps the event', async () => {
+  const { io, service, store, old, current, resubscribe } = resubscribed();
+  const path = await service.openEvent(old);
+  const copy = 'Calendar Notes/FW Meeting 1.md';
+  io.files.set(copy, io.files.get(path)!);
+  delete store.state.noteLinks[old.id];
+  resubscribe();
+  assert.equal(await service.openEvent(current), path);
+  assert.equal(parseEventNote(io.files.get(copy)!, copy)?.id, old.id);
+});
+
+test('when nothing tells the copies apart, a click asks which note keeps the event', async () => {
+  const { io, service, store, old, current, resubscribe, opened } = resubscribed();
+  const path = await service.openEvent(old);
+  const copy = 'Calendar Notes/FW Meeting 1.md';
+  io.files.set(copy, io.files.get(path)!);
+  const link = store.state.noteLinks[old.id];
+  io.files.set(link.dailyPath, io.files.get(link.dailyPath)!.replace(`${link.bullet}\n`, ''));
+  delete store.state.noteLinks[old.id];
+  resubscribe();
+  let offered: string[] = [];
+  await assert.rejects(service.openEvent(current, async paths => { offered = paths; return undefined; }), /No Event Note was chosen/);
+  assert.deepEqual(offered.sort(), [copy, path].sort());
+  assert.equal(await service.openEvent(current, async () => copy), copy);
+  assert.equal(parseEventNote(io.files.get(copy)!, copy)?.id, current.id);
+  assert.equal(parseEventNote(io.files.get(path)!, path)?.id, old.id);
+  assert.equal(opened.at(-1), copy);
+  store.state.sourceCaches.new = { ...emptySourceCache(), accepted: { [current.id]: { event: current, revision: 0 } } };
+  await service.scanEvents();
+  assert.deepEqual(service.diagnostics, [`${path}: Created by a calendar subscription that was removed; ${copy} now holds this event. Delete this copy or merge it into that note.`]);
 });
