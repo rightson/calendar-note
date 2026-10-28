@@ -38,16 +38,20 @@ export function validatePluginSettings(app: App, settings: PluginSettings): { ev
 
 export class CalendarNoteSettingTab extends PluginSettingTab {
   private statusElements = new Map<string, HTMLElement>();
+  private samples: (() => void)[] = [];
   constructor(app: App, private plugin: CalendarNotePlugin) { super(app, plugin); }
   display(): void {
     const root = this.containerEl;
+    // Emptying collapses the scroll height, which would snap the page back to the top.
+    const scrollTop = root.scrollTop;
     root.empty();
     this.statusElements.clear();
+    this.samples = [];
     const settings = this.plugin.store.state.settings;
     root.createEl('p', { text: 'Local events work without a calendar subscription.' });
     new Setting(root).setName('Note paths').setHeading();
     this.text(root, 'Event Note pattern', 'Moment date tokens, {title}, {calendar}, and {uid}.', 'eventPattern');
-    root.createEl('p', { text: 'Sample: ' + eventNotePath(sample, 'Local', settings), cls: 'setting-item-description' });
+    this.sample(root, current => eventNotePath(sample, 'Local', current));
     this.dropdown(root, 'Event Note Properties', 'eventPropertiesDefault', [
       ['obsidian', 'Follow Obsidian'], ['collapsed', 'Collapsed'], ['expanded', 'Expanded'],
     ], 'Initial Properties state when an Event Note opens. You can toggle it in the note.');
@@ -56,13 +60,13 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
     this.text(root, 'Daily fallback folder', 'Used when core Daily Notes is disabled.', 'dailyFolder');
     this.text(root, 'Daily fallback format', 'Moment date format; no event placeholders.', 'dailyFormat');
     this.text(root, 'Daily fallback template', 'Vault-relative Markdown template path, optional.', 'dailyTemplate');
-    root.createEl('p', { text: 'Sample: ' + dailyNotePath('2026-10-23', this.app, settings), cls: 'setting-item-description' });
+    this.sample(root, current => dailyNotePath('2026-10-23', this.app, current));
     const weekly = resolveWeeklySettings(this.app, settings);
     root.createEl('p', { text: `Weekly Notes provider: ${weekly.provider === 'calendar-note' ? 'Calendar Note' : weekly.provider}`, cls: 'setting-item-description' });
     this.text(root, 'Weekly fallback folder', 'Used when Calendar and Periodic Notes have no active weekly settings.', 'weeklyFolder');
     this.text(root, 'Weekly fallback format', 'Moment locale week tokens: gggg and ww. ISO: GGGG and WW.', 'weeklyFormat');
     this.text(root, 'Weekly fallback template', 'Vault-relative Markdown template path, optional.', 'weeklyTemplate');
-    root.createEl('p', { text: 'Sample: ' + weeklyNotePath('2026-10-23', this.app, settings), cls: 'setting-item-description' });
+    this.sample(root, current => weeklyNotePath('2026-10-23', this.app, current));
     new Setting(root).setName('Calendar display').setHeading();
     this.dropdown(root, 'Week numbering', 'weekMode', [['calendar', 'Calendar locale'], ['iso', 'ISO 8601']]);
     this.dropdown(root, 'Week starts on', 'weekStart', [
@@ -79,7 +83,7 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
     for (const source of settings.sources) this.sourceSetting(root, source);
     new Setting(root).setName('Add subscription').setDesc('A blank URL stays inactive.').addButton(button => button.setButtonText('Add calendar').onClick(async () => {
       const id = crypto.randomUUID();
-      await this.save(next => { next.sources.push({ id, name: 'New calendar', url: '', color: '#5885d8', enabled: false }); });
+      await this.save(next => { next.sources.push({ id, name: 'New calendar', url: '', color: '#5885d8', enabled: false }); }, true);
     }));
     new Setting(root).setName('Event Note diagnostics').setHeading();
     if (!this.plugin.notes.diagnostics.length) root.createEl('p', { text: 'No invalid Event Notes found.', cls: 'setting-item-description' });
@@ -89,10 +93,12 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
       for (const diagnostic of this.plugin.notes.diagnostics) list.createEl('li', { text: diagnostic });
     }
     this.refreshSubscriptionStatus();
+    root.scrollTop = scrollTop;
   }
 
   hide(): void {
     this.statusElements.clear();
+    this.samples = [];
     super.hide();
   }
 
@@ -107,11 +113,23 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
     }
   }
 
-  private async save(change: (settings: PluginSettings) => void, redraw = true): Promise<boolean> {
+  private sample(root: HTMLElement, path: (settings: PluginSettings) => string): void {
+    const element = root.createEl('p', { cls: 'setting-item-description' });
+    const update = () => element.setText('Sample: ' + path(this.plugin.store.state.settings));
+    update();
+    this.samples.push(update);
+  }
+
+  // Only adding or removing a subscription changes the page structure; every other edit
+  // updates in place so focus, typed input, and scroll position survive the save.
+  private async save(change: (settings: PluginSettings) => void, redraw = false): Promise<boolean> {
     try {
       await this.plugin.updateSettings(change, next => { validatePluginSettings(this.app, next); });
       if (redraw) this.display();
-      else this.refreshSubscriptionStatus();
+      else {
+        for (const update of this.samples) update();
+        this.refreshSubscriptionStatus();
+      }
       return true;
     } catch (error) {
       new Notice(error instanceof Error ? error.message : 'Could not save settings.');
@@ -158,7 +176,7 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
     let enabledToggle: ToggleComponent | undefined;
     let syncingToggle = false;
     const update = (patch: Partial<CalendarSource>) => {
-      void this.save(next => { patchSubscription(next, source.id, patch); }, false).then(saved => {
+      void this.save(next => { patchSubscription(next, source.id, patch); }).then(saved => {
         if (saved && patch.name !== undefined) heading.setName(patch.name);
         const latest = this.plugin.store.state.settings.sources.find(item => item.id === source.id);
         if (latest && enabledToggle && enabledToggle.getValue() !== latest.enabled) {
@@ -186,7 +204,7 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
       });
     });
     new Setting(section).setName('Remove subscription').setDesc('Existing Event Notes remain in the Vault and are reused if you add the same calendar again.').addButton(button => button.setButtonText('Remove').onClick(() => {
-      void this.save(next => { next.sources = next.sources.filter(item => item.id !== source.id); });
+      void this.save(next => { next.sources = next.sources.filter(item => item.id !== source.id); }, true);
     }));
     this.statusElements.set(source.id, section.createEl('p', { cls: 'setting-item-description' }));
   }
