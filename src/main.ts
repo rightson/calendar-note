@@ -8,7 +8,7 @@ import { DEFAULT_SETTINGS } from './settings';
 import { normalizeState } from './state';
 import { CalendarStore, RecoveryConflict } from './store';
 import { createObsidianStoreIO } from './vault-adapter';
-import { EventNoteService } from './events';
+import { EventNoteService, type ChooseNote } from './events';
 import { SubscriptionService } from './subscriptions';
 import { SourceSyncService } from './sync';
 import { SettingsUpdateQueue } from './subscription-settings';
@@ -218,6 +218,16 @@ export default class CalendarNotePlugin extends Plugin {
     this.events = this.events.map(item => item.id === updated.id ? updated : item);
     this.refreshViews();
     this.scheduleScan();
+  }
+
+  async linkEventNote(event: CalendarEvent, path: string, choose?: ChooseNote): Promise<void> {
+    await this.runAction(async () => {
+      const linked = await this.notes.linkNote(event, path, choose);
+      const file = this.app.vault.getAbstractFileByPath(linked);
+      if (file instanceof TFile) await this.app.workspace.getLeaf(true).openFile(file);
+      new Notice(`Linked the event to ${linked}.`);
+      this.scheduleScan();
+    });
   }
 
   updateSettings(change: (settings: PluginSettings) => void, validate?: (settings: PluginSettings) => void): Promise<void> {

@@ -5,7 +5,7 @@ import { CalendarStore, type RecoveryJournal, type StoreIO } from '../src/store'
 import { freshState } from '../src/state';
 import { DEFAULT_SETTINGS } from '../src/settings';
 import type { App } from 'obsidian';
-import { addEventBullet, newEventNote, parseEventNote, removeDuplicateEventNoteTitle, validateInterval, validateSourceInterval, writeEventFrontmatter } from '../src/notes';
+import { addEventBullet, detachEventFrontmatter, managedEventKeys, newEventNote, parseEventNote, removeDuplicateEventNoteTitle, validateInterval, validateSourceInterval, writeEventFrontmatter } from '../src/notes';
 import { emptySourceCache } from '../src/history';
 import { sourceEventId } from '../src/ical';
 import type { CalendarEvent } from '../src/types';
@@ -873,4 +873,73 @@ test('when nothing tells the copies apart, a click asks which note keeps the eve
   store.state.sourceCaches.new = { ...emptySourceCache(), accepted: { [current.id]: { event: current, revision: 0 } } };
   await service.scanEvents();
   assert.deepEqual(service.diagnostics, [`${path}: Created by a calendar subscription that was removed; ${copy} now holds this event. Delete this copy or merge it into that note.`]);
+});
+
+test('an event can be linked to an existing note, keeping both notes\' other content', async () => {
+  const { io, service, store } = setup();
+  const event = await service.createLocal({ title: 'Roadmap', start, end });
+  const old = store.state.noteLinks[event.id];
+  io.files.set(old.eventPath, `${io.files.get(old.eventPath)!}Agenda written here.\n`);
+  await service.scanEvents();
+  io.files.set('Projects/Plan.md', '---\ntags: [plan]\n---\nExisting plan.\n');
+  assert.equal(await service.linkNote(event, 'Projects/Plan.md'), 'Projects/Plan.md');
+  const plan = io.files.get('Projects/Plan.md')!;
+  assert.equal(parseEventNote(plan, 'Projects/Plan.md')?.id, event.id);
+  assert.match(plan, /^---\ntags: \[plan\]\nevent_id: /);
+  assert.match(plan, /Existing plan\.\n$/);
+  assert.equal(io.files.get(old.eventPath), 'Agenda written here.\n');
+  const link = store.state.noteLinks[event.id];
+  assert.equal(link.eventPath, 'Projects/Plan.md');
+  assert.equal(link.bullet, '- 10:00–11:00 [[Projects/Plan|Plan]]');
+  const daily = io.files.get(link.dailyPath)!;
+  assert.equal(daily.split(link.bullet).length - 1, 1);
+  assert.doesNotMatch(daily, /Calendar Notes\/Roadmap/);
+  assert.equal(store.state.pathTypes['calendar notes/roadmap.md'], undefined);
+  assert.equal(store.state.pathTypes['projects/plan.md'].ownerId, event.id);
+  const scanned = await service.scanEvents();
+  assert.deepEqual(scanned.map(item => [item.id, item.title]), [[event.id, 'Plan']]);
+  assert.deepEqual(service.diagnostics, []);
+  // The original note can take the event back.
+  await service.linkNote(event, old.eventPath);
+  assert.equal(parseEventNote(io.files.get(old.eventPath)!, old.eventPath)?.id, event.id);
+  assert.equal(io.files.get('Projects/Plan.md'), '---\ntags: [plan]\n---\nExisting plan.\n');
+  assert.equal(io.files.get(link.dailyPath)!.split('[[').length - 1, 1);
+});
+
+test('linking an unopened imported event to a new path creates the note and its Daily entry', async () => {
+  const { io, service, store } = setup();
+  const event = imported();
+  const cache = emptySourceCache();
+  cache.accepted[event.id] = { event, revision: 0 };
+  store.state.sourceCaches.work = cache;
+  await service.linkNote(event, 'Meetings/Weekly sync.md');
+  const note = parseEventNote(io.files.get('Meetings/Weekly sync.md')!, 'Meetings/Weekly sync.md');
+  assert.deepEqual([note?.id, note?.source, note?.uid, note?.title], [event.id, 'work', 'uid-1', 'Imported']);
+  const link = store.state.noteLinks[event.id];
+  assert.equal(io.files.get(link.dailyPath)!.split('[[Meetings/Weekly sync|Imported]]').length - 1, 1);
+  assert.equal(io.files.size, 2);
+});
+
+test('a note that belongs elsewhere or uses managed properties is never linked', async () => {
+  const { io, service, store } = setup();
+  const first = await service.createLocal({ title: 'First', start, end });
+  const second = await service.createLocal({ title: 'Second', start, end });
+  io.files.set('Timed.md', '---\nstart: tomorrow\n---\nBody\n');
+  io.files.set('Broken.md', '---\ntags: [\n---\nBody\n');
+  const before = new Map(io.files);
+  const links = structuredClone(store.state.noteLinks);
+  await assert.rejects(service.linkNote(first, store.state.noteLinks[second.id].eventPath), /another event/);
+  await assert.rejects(service.linkNote(first, 'Timed.md'), /already has the start property/);
+  await assert.rejects(service.linkNote(first, 'Broken.md'), /Invalid YAML/);
+  await assert.rejects(service.linkNote(first, store.state.noteLinks[first.id].dailyPath), /Daily Note/);
+  await assert.rejects(service.linkNote(first, 'Picture.png'), /Markdown/);
+  assert.deepEqual(io.files, before);
+  assert.deepEqual(store.state.noteLinks, links);
+});
+
+test('detaching an Event Note drops only managed properties', () => {
+  const note = writeEventFrontmatter('---\ntags: [x]\n---\nBody\n', { id: 'local|a', sourceId: 'local', uid: 'a', title: 'A', start, end, allDay: false });
+  assert.equal(detachEventFrontmatter(note), '---\ntags: [x]\n---\nBody\n');
+  assert.equal(detachEventFrontmatter(writeEventFrontmatter('Body\n', { id: 'local|a', sourceId: 'local', uid: 'a', title: 'A', start, end, allDay: false })), 'Body\n');
+  assert.deepEqual(managedEventKeys(note), ['event_id', 'start', 'end']);
 });

@@ -5,7 +5,7 @@ import { resolveDailySettings, resolveWeeklySettings, resolveWeekRules } from '.
 import { pathKey, type NoteLink } from './state';
 import { CalendarStore, type PlannedWrite } from './store';
 import type { CalendarEvent, Interval, PluginSettings } from './types';
-import { adoptEventFrontmatter, eventBullet, hasEventBullet, newEventNote, parseEventNote, removeDuplicateEventNoteTitle, removeEventBullets, upsertEventBullet, validateEventInterval, validateInterval, writeEventFrontmatter } from './notes';
+import { adoptEventFrontmatter, assertValidFrontmatter, detachEventFrontmatter, eventBullet, hasEventBullet, managedEventKeys, newEventNote, parseEventNote, removeDuplicateEventNoteTitle, removeEventBullets, upsertEventBullet, validateEventInterval, validateInterval, writeEventFrontmatter } from './notes';
 
 export interface EventWritePlan {
   writes: PlannedWrite[];
@@ -154,7 +154,10 @@ export class EventNoteService {
       if (content === null) continue;
       if (!content.includes('event_id:')) {
         const remembered = this.lastValid.get(path);
-        if (remembered) { events.set(remembered.id, remembered); diagnostics.push(`${path}: Event Note is missing event_id; last valid event remains visible.`); }
+        // A note the user relinked away from is no longer this event's.
+        const moved = remembered && this.store.state.noteLinks[remembered.id] && this.store.state.noteLinks[remembered.id].eventPath !== path;
+        if (moved) this.lastValid.delete(path);
+        else if (remembered) { events.set(remembered.id, remembered); diagnostics.push(`${path}: Event Note is missing event_id; last valid event remains visible.`); }
         continue;
       }
       try {
@@ -457,6 +460,68 @@ export class EventNoteService {
       await this.store.commit(plan.writes, state => { state.noteLinks[event.id] = plan.link; });
       await this.openPath(plan.notePath);
       return plan.notePath;
+    });
+  }
+
+  /**
+   * Make the note at `target` this event's Event Note, creating it when
+   * missing. The previous Event Note keeps its body and other properties but
+   * loses the managed ones, so exactly one note carries the event_id.
+   */
+  async linkNote(clicked: CalendarEvent, target: string, choose?: ChooseNote): Promise<string> {
+    return this.serialized(async () => {
+      if (!/\.md$/i.test(target)) throw new Error('Choose a Markdown note.');
+      const event = await this.adoptOrphanNote(clicked, choose);
+      const previous: NoteLink | undefined = this.store.state.noteLinks[event.id];
+      if (previous?.pendingRename) throw new Error('Event Note rename is still settling; retry after its links update.');
+      const current = await this.findEventPath(event.id);
+      if (current && pathKey(current) === pathKey(target)) return current;
+      const key = pathKey(target);
+      const claim = this.store.state.pathTypes[key];
+      if (claim && claim.type !== 'event') throw new Error(`${target} is a ${claim.type} Note and cannot hold an event.`);
+      if (Object.values(this.store.state.noteLinks).some(link => pathKey(link.dailyPath) === key)) throw new Error(`${target} is a Daily Note and cannot hold an event.`);
+      const otherOwner = claim?.ownerId !== event.id ? claim?.ownerId : undefined;
+      if (otherOwner && pathKey(this.store.state.noteLinks[otherOwner]?.eventPath ?? '') === key) {
+        throw new Error(`${target} is linked to another event.`);
+      }
+      const before = await this.store.io.read(target);
+      if (before !== null) {
+        assertValidFrontmatter(before, target);
+        if (parseEventNote(before, target)) throw new Error(`${target} is already the Event Note of another event.`);
+        const used = managedEventKeys(before);
+        if (used.length) throw new Error(`${target} already has the ${used.join(', ')} ${used.length > 1 ? 'properties' : 'property'}. Rename or remove ${used.length > 1 ? 'them' : 'it'} first.`);
+      }
+      const after = before === null ? newEventNote(event, target) : writeEventFrontmatter(before, event);
+      // The note's own heading or filename becomes the event title, as for any Event Note.
+      const linked = { ...event, title: parseEventNote(after, target)!.title };
+      const settings = this.getSettings();
+      const date = eventCalendarDate(linked, settings.timeZone);
+      const dailyPath = dailyNotePath(date, this.app, settings);
+      await this.assertPathType(dailyPath, 'daily');
+      if (pathKey(dailyPath) === key) throw new Error('Event and Daily Note paths conflict.');
+      const writes: PlannedWrite[] = [{ path: target, before, after, type: 'event', ownerId: event.id }];
+      if (current) {
+        const currentBefore = await this.store.io.read(current);
+        writes.push({ path: current, before: currentBefore, after: detachEventFrontmatter(currentBefore!), type: 'event', ownerId: event.id });
+      }
+      const notePaths = [...new Set([target, ...current ? [current] : [], ...previous ? [previous.eventPath] : []])];
+      if (previous && pathKey(previous.dailyPath) !== pathKey(dailyPath)) {
+        const stale = await this.store.io.read(previous.dailyPath);
+        const cleaned = stale === null ? stale : removeEventBullets(stale, notePaths);
+        if (cleaned !== stale) writes.push({ path: previous.dailyPath, before: stale, after: cleaned, type: 'daily' });
+      }
+      const dailyBefore = await this.store.io.read(dailyPath);
+      const bullet = eventBullet(linked, target, settings.timeZone);
+      const dailyAfter = upsertEventBullet(dailyBefore ?? await this.initialDaily(date), bullet, notePaths);
+      if (dailyAfter !== dailyBefore) writes.push({ path: dailyPath, before: dailyBefore, after: dailyAfter, type: 'daily' });
+      // A claim left by an event whose note is gone no longer holds the path.
+      if (otherOwner) await this.store.commit([], state => { delete state.pathTypes[key]; });
+      await this.store.commit(writes, state => {
+        state.noteLinks[event.id] = { eventPath: target, dailyPath, bullet };
+        if (current) delete state.pathTypes[pathKey(current)];
+      });
+      if (current) this.lastValid.delete(current);
+      return target;
     });
   }
 

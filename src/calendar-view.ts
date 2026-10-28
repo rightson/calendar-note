@@ -11,7 +11,7 @@ import { dateAt, weekInfo } from './date';
 import { resolveWeekRules } from './settings';
 import type { CalendarEvent, Interval, PluginSettings } from './types';
 import type CalendarNotePlugin from './main';
-import { EventModal, NoteChoiceModal } from './modals';
+import { EventModal, LinkNoteModal, NoteChoiceModal } from './modals';
 import { visibleMonthCount } from './calendar-layout';
 import { sidebarWidthForContainer, resizeSidebarWithKeyboard } from './sidebar-layout';
 import { subscriptionFailureMessage } from './subscription-settings';
@@ -217,7 +217,7 @@ export class CalendarNoteView extends ItemView {
         details.addEventListener('click', e => { e.stopPropagation(); new EventModal(this.app, this.settings, async value => {
           if (value.title !== event.title) { new Notice('Edit the Event Note title in Obsidian.'); return; }
           await this.plugin.reschedule(event, value.interval);
-        }, event).open(); });
+        }, event, undefined, { path: this.plugin.store.state.noteLinks[event.id]?.eventPath, change: () => void this.changeEventNote(event) }).open(); });
         arg.el.appendChild(details);
         arg.el.addEventListener('contextmenu', e => {
           e.preventDefault(); e.stopPropagation(); this.newEvent(this.pointerInterval(e.clientX, e.clientY, event));
@@ -513,6 +513,11 @@ export class CalendarNoteView extends ItemView {
     if (Date.now() - this.lastDragAt < 600) return;
     const event = this.plugin.eventById(arg.event.id);
     if (event) void this.plugin.runAction(() => this.plugin.notes.openEvent(event, paths => new NoteChoiceModal(this.app, paths).choose()));
+  }
+  private async changeEventNote(event: CalendarEvent): Promise<void> {
+    const current = this.plugin.store.state.noteLinks[event.id]?.eventPath;
+    const path = await new LinkNoteModal(this.app, current).choose();
+    if (path) await this.plugin.linkEventNote(event, path, paths => new NoteChoiceModal(this.app, paths).choose());
   }
   private async handleMove(arg: EventDropArg | EventResizeDoneArg): Promise<void> {
     this.lastDragAt = Date.now();
