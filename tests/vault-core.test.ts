@@ -494,25 +494,25 @@ test('apparent Event heading inside a code fence does not capture a managed bull
   const content = '# Journal\n\n```md\n## Event\n```still code\n- example\n```\n\n## Journal\nText\n';
   const result = addEventBullet(content, '- 10:00 [[A]]');
   assert.match(result, /```still code\n- example\n```/);
-  assert.match(result, /## Journal\nText\n\n## Event\n\n- 10:00 \[\[A\]\]/);
+  assert.match(result, /## Journal\nText\n\n## Events\n- 10:00 \[\[A\]\]/);
 });
 
 test('inline triple backticks at a line start do not hide the Event section', () => {
   const once = addEventBullet('## Journal\n```inline``` code\n', '- 10:00 [[A]]');
-  assert.equal(once, '## Journal\n```inline``` code\n\n## Event\n\n- 10:00 [[A]]\n');
+  assert.equal(once, '## Journal\n```inline``` code\n\n## Events\n- 10:00 [[A]]\n');
   assert.equal(addEventBullet(once, '- 10:00 [[A]]'), once);
 });
 
 test('an unclosed fence is closed before adding the Event entry so later adds find it', () => {
   const bullet = '- 10:00 [[A]]';
   const noSection = addEventBullet('## Journal\n````js\ncode', bullet);
-  assert.equal(noSection, '## Journal\n````js\ncode\n````\n\n## Event\n\n- 10:00 [[A]]\n');
+  assert.equal(noSection, '## Journal\n````js\ncode\n````\n\n## Events\n- 10:00 [[A]]\n');
   assert.equal(addEventBullet(noSection, bullet), noSection);
   const inSection = addEventBullet('## Event\n\n~~~\nnote\n', bullet);
   assert.equal(inSection, '## Event\n\n~~~\nnote\n~~~\n- 10:00 [[A]]\n');
   assert.equal(addEventBullet(inSection, bullet), inSection);
   const later = '## Event\n\n## Journal\n```\ncode\n';
-  assert.equal(addEventBullet(later, bullet), '## Event\n\n- 10:00 [[A]]\n\n## Journal\n```\ncode\n');
+  assert.equal(addEventBullet(later, bullet), '## Event\n- 10:00 [[A]]\n\n## Journal\n```\ncode\n');
 });
 
 test('repeated event clicks add one Daily entry when the Daily Note has an unclosed fence', async () => {
@@ -526,7 +526,7 @@ test('repeated event clicks add one Daily entry when the Daily Note has an unclo
   await service.openEvent(event);
   const daily = io.files.get(store.state.noteLinks[event.id].dailyPath)!;
   assert.equal(daily.split('[[Calendar Notes/Imported').length - 1, 1);
-  assert.equal(daily.split('## Event').length - 1, 1);
+  assert.equal(daily.split('## Events\n').length - 1, 1);
 });
 
 test('invalid Event Note edit keeps the last valid local event visible until repaired', async () => {
@@ -625,6 +625,92 @@ test('an unrelated note at the deleted Event Note path does not block recreation
   const path = await service.openEvent(event);
   assert.equal(path, original.eventPath);
   assert.equal(io.files.get(link.eventPath), '# Something else\n');
+});
+
+test('clicking an event whose Daily entry was removed adds it back instead of failing', async () => {
+  const { io, service, store, opened } = setup();
+  const event = await service.createLocal({ title: 'Roadmap', start, end });
+  const link = store.state.noteLinks[event.id];
+  io.files.set(link.dailyPath, io.files.get(link.dailyPath)!.replace(`${link.bullet}\n`, ''));
+  await service.openEvent(event);
+  assert.equal(io.files.get(link.dailyPath)!.split(link.bullet).length - 1, 1);
+  assert.deepEqual(opened, [link.eventPath]);
+});
+
+test('a generated entry with a stale alias or time is rewritten in place on click', async () => {
+  const { io, service, store } = setup();
+  const event = await service.createLocal({ title: 'Roadmap', start, end });
+  const link = store.state.noteLinks[event.id];
+  const stale = '- 09:00–09:30 [[Calendar Notes/Roadmap|Old name]]';
+  io.files.set(link.dailyPath, `## Journal\n\n${stale}\n\n## Event\n\n- 08:00 [[Other|Other]]\n`);
+  store.state.noteLinks[event.id] = { ...link, bullet: '- 07:00–08:00 [[Calendar Notes/Roadmap|Never written]]' };
+  await service.openEvent(event);
+  assert.equal(io.files.get(link.dailyPath), `## Journal\n\n${link.bullet}\n\n## Event\n\n- 08:00 [[Other|Other]]\n`);
+  assert.equal(store.state.noteLinks[event.id].bullet, link.bullet);
+});
+
+test('repeated generated entries for one event collapse to one; handwritten links stay', async () => {
+  const { io, service, store } = setup();
+  const event = await service.createLocal({ title: 'Roadmap', start, end });
+  const link = store.state.noteLinks[event.id];
+  const own = '- Discussed [[Calendar Notes/Roadmap|the roadmap]]';
+  io.files.set(link.dailyPath, `## Event\n\n${link.bullet}\n- 09:00–10:00 [[Calendar Notes/Roadmap|Roadmap]]\n${own}\n\n## Event\n\n${link.bullet}\n`);
+  await service.openEvent(event);
+  assert.equal(io.files.get(link.dailyPath), `## Event\n\n${link.bullet}\n${own}\n\n## Event\n\n`);
+});
+
+test('a background move still asks for a relink when the user rewrote the entry', async () => {
+  const { io, service, store } = setup();
+  const event = await service.createLocal({ title: 'Roadmap', start, end });
+  const link = store.state.noteLinks[event.id];
+  io.files.set(link.dailyPath, io.files.get(link.dailyPath)!.replace(link.bullet, '- Roadmap, moved to tomorrow'));
+  const moved = { ...event, start: '2026-10-23T10:00:00+08:00', end: '2026-10-23T11:00:00+08:00' };
+  await assert.rejects(service.updateLinkedInterval(event, moved), /relink/);
+  await service.openEvent(event);
+  assert.match(io.files.get(link.dailyPath)!, /- Roadmap, moved to tomorrow\n[\s\S]*- 10:00–11:00 \[\[Calendar Notes\/Roadmap\|Roadmap\]\]/);
+});
+
+test('a rename settles when the Daily Note holds repeated entries for the event', async () => {
+  const { io, service, store } = setup();
+  const event = await service.createLocal({ title: 'Twice', start, end });
+  const old = store.state.noteLinks[event.id];
+  io.files.set(old.dailyPath, `${io.files.get(old.dailyPath)!}${old.bullet}\n`);
+  const moved = 'Calendar Notes/Twice renamed.md';
+  io.files.set(moved, io.files.get(old.eventPath)!);
+  io.files.delete(old.eventPath);
+  await service.handleRename({ path: moved, extension: 'md' } as never, old.eventPath);
+  await service.finalizePendingRenames(moved);
+  const link = store.state.noteLinks[event.id];
+  assert.equal(link.pendingRename, undefined);
+  assert.equal(io.files.get(old.dailyPath)!.split('[[Calendar Notes/Twice').length - 1, 1);
+  assert.equal(await service.openEvent(event), moved);
+});
+
+test('a scan replan queued beside a click leaves the link matching the Daily Note', async () => {
+  const { io, service, store } = setup();
+  const event = await service.createLocal({ title: 'Roadmap', start, end });
+  const link = store.state.noteLinks[event.id];
+  io.files.set(link.eventPath, `${io.files.get(link.eventPath)!}# Renamed heading\n`);
+  await Promise.all([service.openEvent(event), service.scanEvents()]);
+  const current = store.state.noteLinks[event.id];
+  assert.equal(io.files.get(current.dailyPath)!.split(current.bullet).length - 1, 1);
+  await service.openEvent((await service.scanEvents())[0]);
+});
+
+test('a new Daily Note lists entries directly under ## Events', async () => {
+  const { io, service, store } = setup();
+  const one = await service.createLocal({ title: 'One', start, end });
+  await service.createLocal({ title: 'Two', start: '2026-10-22T12:00:00+08:00', end: '2026-10-22T13:00:00+08:00' });
+  assert.equal(io.files.get(store.state.noteLinks[one.id].dailyPath),
+    '## Journal\n\n## Events\n- 10:00–11:00 [[Calendar Notes/One|One]]\n- 12:00–13:00 [[Calendar Notes/Two|Two]]\n');
+});
+
+test('entries join an existing section after its last entry, legacy ## Event included', () => {
+  const bullet = '- 12:00 [[B]]';
+  assert.equal(addEventBullet('## Events\n- 10:00 [[A]]\n\n## Journal\nText\n', bullet),
+    '## Events\n- 10:00 [[A]]\n- 12:00 [[B]]\n\n## Journal\nText\n');
+  assert.equal(addEventBullet('## Event\n\n- 10:00 [[A]]\n', bullet), '## Event\n\n- 10:00 [[A]]\n- 12:00 [[B]]\n');
+  assert.equal(addEventBullet('## Events', bullet), '## Events\n- 12:00 [[B]]\n');
 });
 
 test('a linked Event Note that the Markdown listing misses still opens at its linked path', async () => {

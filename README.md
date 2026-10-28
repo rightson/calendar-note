@@ -12,7 +12,7 @@ Calendar-Note requires **Obsidian 1.14.5 or later** and supports desktop Obsidia
 
 ## Use
 
-Open the calendar from the ribbon icon or the command palette. Create a local event from **New event** or an empty calendar slot. The event is saved as a Markdown Event Note and linked under `## Event` in the Daily Note for its start date. Click a date to open its Daily Note; the sidebar's week number opens that Weekly Note.
+Open the calendar from the ribbon icon or the command palette. Create a local event from **New event** or an empty calendar slot. The event is saved as a Markdown Event Note and linked under `## Events` in the Daily Note for its start date. Click a date to open its Daily Note; the sidebar's week number opens that Weekly Note.
 
 Subscriptions are optional. Add an HTTPS or `webcal://` feed in settings to display read-only calendar events. Local events work without a subscription. Imported calendar data is cached for use in the calendar, and event changes can be reviewed in History. Removing the plugin or a feed does not delete Vault notes.
 
@@ -22,4 +22,4 @@ No account or telemetry is required. Calendar-Note makes read-only HTTPS request
 
 Event Note Properties behavior depends on Obsidian's native editor DOM and is feature-detected; if the property panel is unavailable or hidden, Calendar-Note leaves it alone. Daily and Weekly Note provider settings are detected through internal Obsidian/plugin state because there is no public provider API, so provider updates may require compatibility changes.
 
-See [0.1.0 release notes](docs/releases/0.1.0.md) for the verified scope and known QA limits, [installation guide](docs/manuals/INSTALLATION.md) for setup and updates, and [development and QA](docs/manuals/DEVELOPMENT.md) for build instructions and test coverage. Calendar-Note is licensed under [MIT](LICENSE). Third-party dependency license text is embedded in the release `main.js` and included as `THIRD_PARTY_LICENSES.txt` in the package ZIP.
+See [0.1.1 release notes](docs/releases/0.1.1.md) for the verified scope and known QA limits, [installation guide](docs/manuals/INSTALLATION.md) for setup and updates, and [development and QA](docs/manuals/DEVELOPMENT.md) for build instructions and test coverage. Calendar-Note is licensed under [MIT](LICENSE). Third-party dependency license text is embedded in the release `main.js` and included as `THIRD_PARTY_LICENSES.txt` in the package ZIP.
