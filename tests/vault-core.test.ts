@@ -712,3 +712,15 @@ test('entries join an existing section after its last entry, legacy ## Event inc
   assert.equal(addEventBullet('## Event\n\n- 10:00 [[A]]\n', bullet), '## Event\n\n- 10:00 [[A]]\n- 12:00 [[B]]\n');
   assert.equal(addEventBullet('## Events', bullet), '## Events\n- 12:00 [[B]]\n');
 });
+
+test('a linked Event Note that the Markdown listing misses still opens at its linked path', async () => {
+  const { io, service, store } = setup();
+  const event = imported();
+  await service.openEvent(event);
+  const link = store.state.noteLinks[event.id];
+  const listMarkdown = io.listMarkdown.bind(io);
+  io.listMarkdown = async () => (await listMarkdown()).filter(path => path !== link.eventPath);
+  store.state.settings.eventPattern = 'Elsewhere/{title}';
+  assert.equal(await service.openEvent(event), link.eventPath);
+  assert.equal(store.state.noteLinks[event.id].eventPath, link.eventPath);
+});
