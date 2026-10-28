@@ -736,3 +736,72 @@ test('a linked Event Note that the Markdown listing misses still opens at its li
   assert.equal(await service.openEvent(event), link.eventPath);
   assert.equal(store.state.noteLinks[event.id].eventPath, link.eventPath);
 });
+
+function resubscribed() {
+  const context = setup();
+  const source = (id: string) => ({ id, name: 'Work', url: 'https://example.test/work.ics', color: '#123456', enabled: true });
+  const event = (sourceId: string): CalendarEvent => ({ id: sourceEventId(sourceId, 'uid-fw'), sourceId, uid: 'uid-fw',
+    title: 'FW: Meeting', start, end, allDay: false, status: 'active' });
+  context.store.state.settings = { ...context.store.state.settings, sources: [source('old')] };
+  const resubscribe = () => { context.store.state.settings = { ...context.store.state.settings, sources: [source('new')] }; };
+  return { ...context, old: event('old'), current: event('new'), resubscribe };
+}
+
+test('re-adding a removed subscription reuses its Event Note and Daily entry', async () => {
+  const { io, service, store, old, current, resubscribe } = resubscribed();
+  const path = await service.openEvent(old);
+  const link = store.state.noteLinks[old.id];
+  resubscribe();
+  // 0.1.0 had already recorded a link to a "(2)" note it never wrote.
+  store.state.noteLinks[current.id] = { eventPath: 'Calendar Notes/FW Meeting (2).md', dailyPath: link.dailyPath,
+    bullet: '- 10:00–11:00 [[Calendar Notes/FW Meeting (2)|FW: Meeting]]' };
+  assert.equal(await service.openEvent(current), path);
+  assert.equal(parseEventNote(io.files.get(path)!, path)?.id, current.id);
+  assert.match(io.files.get(path)!, /source: "new"/);
+  assert.equal(io.files.has('Calendar Notes/FW Meeting (2).md'), false);
+  assert.equal(store.state.noteLinks[old.id], undefined);
+  assert.equal(store.state.noteLinks[current.id].eventPath, path);
+  assert.equal(io.files.get(link.dailyPath)!.split('[[Calendar Notes/FW Meeting').length - 1, 1);
+  assert.equal(await service.openEvent(current), path);
+});
+
+test('an adopted note keeps the times the user changed under the removed subscription', async () => {
+  const { io, service, store, old, current, resubscribe } = resubscribed();
+  await service.openEvent(old);
+  const moved = { start: '2026-10-22T14:00:00+08:00', end: '2026-10-22T15:00:00+08:00', allDay: false };
+  await service.reschedule(old, moved);
+  resubscribe();
+  const path = await service.openEvent(current);
+  assert.match(io.files.get(path)!, /start: "2026-10-22T14:00:00\+08:00"/);
+  assert.deepEqual(store.state.overrides[current.id], moved);
+  assert.equal(store.state.overrides[old.id], undefined);
+});
+
+test('several notes from a removed subscription: the linked one is reused, otherwise the user is asked', async () => {
+  const { io, service, store, old, current, resubscribe } = resubscribed();
+  const path = await service.openEvent(old);
+  const copy = 'Calendar Notes/FW Meeting 1.md';
+  io.files.set(copy, io.files.get(path)!);
+  resubscribe();
+  assert.equal(await service.openEvent(current), path);
+  assert.equal(parseEventNote(io.files.get(copy)!, copy)?.id, old.id);
+
+  const other = resubscribed();
+  const otherPath = await other.service.openEvent(other.old);
+  other.io.files.set(copy, other.io.files.get(otherPath)!);
+  delete other.store.state.noteLinks[other.old.id];
+  other.resubscribe();
+  await assert.rejects(other.service.openEvent(other.current), /Several Event Notes from a removed calendar.*FW Meeting\.md.*FW Meeting 1\.md/);
+  assert.equal(other.io.files.has('Calendar Notes/FW Meeting (2).md'), false);
+});
+
+test('notes of a still-configured subscription are never adopted by another one', async () => {
+  const { io, service, store, old } = resubscribed();
+  const path = await service.openEvent(old);
+  const sibling = { ...old, id: sourceEventId('new', 'uid-fw'), sourceId: 'new' };
+  store.state.settings = { ...store.state.settings, sources: [...store.state.settings.sources,
+    { id: 'new', name: 'Other', url: 'https://example.test/other.ics', color: '#654321', enabled: true }] };
+  const second = await service.openEvent(sibling);
+  assert.notEqual(second, path);
+  assert.equal(parseEventNote(io.files.get(path)!, path)?.id, old.id);
+});

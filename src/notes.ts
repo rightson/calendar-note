@@ -109,6 +109,15 @@ export function writeEventFrontmatter(content: string, event: CalendarEvent): st
   return `---${fm.newline}${lines.join(fm.newline)}${fm.newline}---${fm.newline}${fm.body}`;
 }
 
+/** Give a removed calendar's Event Note the identity of the same event in its replacement. */
+export function adoptEventFrontmatter(content: string, event: CalendarEvent): string {
+  const fm = splitFrontmatter(content);
+  const index = fm.lines.findIndex(line => /^event_id:(?:\s|$)/.test(line));
+  if (index < 0) throw new Error('Only an Event Note can be adopted.');
+  const lines = fm.lines.map((line, at) => at === index ? `event_id: ${JSON.stringify(event.id)}` : line);
+  return writeEventFrontmatter(`---${fm.newline}${lines.join(fm.newline)}${fm.newline}---${fm.newline}${fm.body}`, event);
+}
+
 export function newEventNote(event: CalendarEvent, notePath?: string): string {
   const basename = notePath?.split('/').pop()?.replace(/\.md$/i, '').normalize('NFC');
   if (basename === event.title.normalize('NFC')) return writeEventFrontmatter('', event);
