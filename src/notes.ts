@@ -141,23 +141,31 @@ export function eventBullet(event: CalendarEvent, notePath: string, zone: string
 }
 
 interface Line { text: string; start: number; end: number; plain: boolean }
-function markdownLines(content: string): Line[] {
+/** Split Markdown into lines and return the fence still open at the end, if any. */
+function scanMarkdown(content: string): { lines: Line[]; openFence: string | null } {
   const bodyStart = content.length - splitFrontmatter(content).body.length;
   let offset = 0;
-  let fence: { mark: string; length: number } | null = null;
-  return content.split('\n').map((text, index, array) => {
+  let fence = null as { mark: string; length: number } | null;
+  const lines = content.split('\n').map((text, index, array) => {
     const start = offset;
     offset += text.length + (index < array.length - 1 ? 1 : 0);
     const raw = text.replace(/\r$/, '');
-    const marker = start >= bodyStart ? /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(raw) : null;
+    // A backtick fence's info string cannot contain backticks, so ```code``` is inline code.
+    const match = start >= bodyStart ? /^ {0,3}(?:(`{3,})([^`]*)|(~{3,})(.*))$/.exec(raw) : null;
+    const marker = match ? [match[1] ?? match[3], match[2] ?? match[4]] : null;
     let plain = start >= bodyStart && !fence && !marker;
     if (marker) {
-      if (!fence) fence = { mark: marker[1][0], length: marker[1].length };
-      else if (fence.mark === marker[1][0] && marker[1].length >= fence.length && !marker[2].trim()) fence = null;
+      if (!fence) fence = { mark: marker[0][0], length: marker[0].length };
+      else if (fence.mark === marker[0][0] && marker[0].length >= fence.length && !marker[1].trim()) fence = null;
       plain = false;
     }
     return { text: raw, start, end: offset, plain };
   });
+  return { lines, openFence: fence ? fence.mark.repeat(fence.length) : null };
+}
+
+function markdownLines(content: string): Line[] {
+  return scanMarkdown(content).lines;
 }
 
 function eventSection(content: string): { start: number; end: number } | null {
@@ -213,8 +221,12 @@ export function removeTrackedBullet(content: string, bullet: string): string {
 export function addEventBullet(content: string, bullet: string): string {
   if (trackedLine(content, bullet)) return content;
   const section = eventSection(content);
-  if (!section) return `${content}${content.endsWith('\n') ? '' : '\n'}\n## Event\n\n${bullet}\n`;
+  // An unclosed fence runs to the end of the note. Text appended there stays
+  // code, so the entry would never be found and every open would add another.
+  const fence = scanMarkdown(content).openFence;
+  const close = fence && (!section || section.end === content.length) ? `${fence}\n` : '';
+  if (!section) return `${content}${content.endsWith('\n') ? '' : '\n'}${close}\n## Event\n\n${bullet}\n`;
   const before = content.slice(0, section.end);
   const after = content.slice(section.end);
-  return `${before}${before.endsWith('\n') ? '' : '\n'}${bullet}\n${after ? '\n' : ''}${after}`;
+  return `${before}${before.endsWith('\n') ? '' : '\n'}${close}${bullet}\n${after ? '\n' : ''}${after}`;
 }

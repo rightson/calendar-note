@@ -497,6 +497,38 @@ test('apparent Event heading inside a code fence does not capture a managed bull
   assert.match(result, /## Journal\nText\n\n## Event\n\n- 10:00 \[\[A\]\]/);
 });
 
+test('inline triple backticks at a line start do not hide the Event section', () => {
+  const once = addEventBullet('## Journal\n```inline``` code\n', '- 10:00 [[A]]');
+  assert.equal(once, '## Journal\n```inline``` code\n\n## Event\n\n- 10:00 [[A]]\n');
+  assert.equal(addEventBullet(once, '- 10:00 [[A]]'), once);
+});
+
+test('an unclosed fence is closed before adding the Event entry so later adds find it', () => {
+  const bullet = '- 10:00 [[A]]';
+  const noSection = addEventBullet('## Journal\n````js\ncode', bullet);
+  assert.equal(noSection, '## Journal\n````js\ncode\n````\n\n## Event\n\n- 10:00 [[A]]\n');
+  assert.equal(addEventBullet(noSection, bullet), noSection);
+  const inSection = addEventBullet('## Event\n\n~~~\nnote\n', bullet);
+  assert.equal(inSection, '## Event\n\n~~~\nnote\n~~~\n- 10:00 [[A]]\n');
+  assert.equal(addEventBullet(inSection, bullet), inSection);
+  const later = '## Event\n\n## Journal\n```\ncode\n';
+  assert.equal(addEventBullet(later, bullet), '## Event\n\n- 10:00 [[A]]\n\n## Journal\n```\ncode\n');
+});
+
+test('repeated event clicks add one Daily entry when the Daily Note has an unclosed fence', async () => {
+  const { io, service, store } = setup();
+  const event = imported();
+  store.state.sourceCaches.work = { ...emptySourceCache(), accepted: { [event.id]: { event, revision: 0 } } };
+  io.files.set('Daily Notes/2026-10-22.md', '## Journal\n```\npasted code\n');
+  await service.openEvent(event);
+  await service.openEvent(event);
+  await service.scanEvents();
+  await service.openEvent(event);
+  const daily = io.files.get(store.state.noteLinks[event.id].dailyPath)!;
+  assert.equal(daily.split('[[Calendar Notes/Imported').length - 1, 1);
+  assert.equal(daily.split('## Event').length - 1, 1);
+});
+
 test('invalid Event Note edit keeps the last valid local event visible until repaired', async () => {
   const { io, service, store } = setup();
   const event = await service.createLocal({ title: 'Retain', start, end });
