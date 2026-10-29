@@ -1,4 +1,4 @@
-import { Modal, Notice, Setting, SuggestModal, type App } from 'obsidian';
+import { Modal, Notice, Setting, SuggestModal, normalizePath, type App } from 'obsidian';
 import moment from 'moment-timezone';
 import type { CalendarEvent, Interval, PluginSettings } from './types';
 import type { ChangeHistoryEntry } from './history';
@@ -19,7 +19,7 @@ export class EventModal extends Modal {
 
   constructor(app: Modal['app'], private settings: PluginSettings,
     private submit: (value: { title: string; interval: Interval }) => Promise<void>, private event?: CalendarEvent,
-    initial?: Interval) {
+    initial?: Interval, private note?: { path?: string; change: () => void }) {
     super(app);
     this.titleValue = event?.title ?? '';
     this.allDay = event?.allDay ?? initial?.allDay ?? false;
@@ -67,6 +67,11 @@ export class EventModal extends Modal {
       startInput.value = this.startValue;
       endInput.value = this.endValue;
     }));
+    if (this.note) {
+      const change = this.note.change;
+      new Setting(root).setName('Event Note').setDesc(this.note.path ?? 'Not created yet')
+        .addButton(button => button.setButtonText('Change…').onClick(() => { this.close(); change(); }));
+    }
     this.errorEl = root.createDiv({ cls: 'cn-validation', attr: { role: 'alert' } });
     const actions = root.createDiv({ cls: 'cn-modal-actions' });
     actions.createEl('button', { text: 'Cancel' }).addEventListener('click', () => this.close());
@@ -182,3 +187,47 @@ export class NoteChoiceModal extends SuggestModal<string> {
     window.setTimeout(() => this.resolve?.(this.chosen), 0);
   }
 }
+
+export interface NoteTarget { path: string; create: boolean }
+
+/** Picks an existing Markdown note, or a new path, to become an event's Event Note. */
+export class LinkNoteModal extends SuggestModal<NoteTarget> {
+  private chosen?: string;
+  private resolve?: (path: string | undefined) => void;
+
+  constructor(app: App, private readonly current?: string) {
+    super(app);
+    this.setPlaceholder('Choose a note for this event, or type a new note path');
+    this.emptyStateText = 'No matching note.';
+  }
+
+  choose(): Promise<string | undefined> {
+    return new Promise(resolve => { this.resolve = resolve; this.open(); });
+  }
+
+  getSuggestions(query: string): NoteTarget[] {
+    const text = query.trim().toLowerCase();
+    const paths = this.app.vault.getMarkdownFiles().map(file => file.path).filter(path => path !== this.current);
+    const matches = paths.filter(path => path.toLowerCase().includes(text))
+      .sort((a, b) => Number(!basename(a).toLowerCase().startsWith(text)) - Number(!basename(b).toLowerCase().startsWith(text)) || a.localeCompare(b))
+      .map(path => ({ path, create: false }));
+    if (!text) return matches;
+    const typed = normalizePath(/\.md$/i.test(query.trim()) ? query.trim() : `${query.trim()}.md`);
+    const exists = this.app.vault.getAbstractFileByPath(typed) !== null;
+    return exists ? matches : [...matches, { path: typed, create: true }];
+  }
+
+  renderSuggestion(target: NoteTarget, el: HTMLElement): void {
+    el.setText(target.create ? `Create ${target.path}` : target.path);
+  }
+
+  onChooseSuggestion(target: NoteTarget): void { this.chosen = target.path; }
+
+  onClose(): void {
+    super.onClose();
+    // Obsidian closes the modal before it reports the chosen suggestion.
+    window.setTimeout(() => this.resolve?.(this.chosen), 0);
+  }
+}
+
+const basename = (path: string) => path.split('/').pop() ?? path;

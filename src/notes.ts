@@ -109,6 +109,28 @@ export function writeEventFrontmatter(content: string, event: CalendarEvent): st
   return `---${fm.newline}${lines.join(fm.newline)}${fm.newline}---${fm.newline}${fm.body}`;
 }
 
+const MANAGED_KEYS = ['event_id', 'start', 'end', 'all_day', 'source', 'ical_uid', 'recurrence_id'];
+const managedLine = (line: string) => MANAGED_KEYS.some(key => new RegExp(`^${key}:(?:\\s|$)`).test(line));
+
+/** Top-level properties an Event Note owns that this note already uses. */
+export function managedEventKeys(content: string): string[] {
+  return MANAGED_KEYS.filter(key => splitFrontmatter(content).lines.some(line => new RegExp(`^${key}:(?:\\s|$)`).test(line)));
+}
+
+export function assertValidFrontmatter(content: string, path: string): void {
+  const fm = splitFrontmatter(content);
+  if (fm.has && parseDocument(fm.lines.join('\n'), { uniqueKeys: true }).errors.length) throw new Error(`Invalid YAML in ${path}.`);
+}
+
+/** Turn an Event Note back into an ordinary note: drop managed properties, keep everything else. */
+export function detachEventFrontmatter(content: string): string {
+  const fm = splitFrontmatter(content);
+  if (!fm.has) return content;
+  const lines = fm.lines.filter(line => !managedLine(line));
+  if (!lines.some(line => line.trim())) return fm.body;
+  return `---${fm.newline}${lines.join(fm.newline)}${fm.newline}---${fm.newline}${fm.body}`;
+}
+
 /** Give a removed calendar's Event Note the identity of the same event in its replacement. */
 export function adoptEventFrontmatter(content: string, event: CalendarEvent): string {
   const fm = splitFrontmatter(content);
