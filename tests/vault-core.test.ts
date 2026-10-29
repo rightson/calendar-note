@@ -41,11 +41,13 @@ function setup(io = new FakeVault()) {
   const settings = { ...DEFAULT_SETTINGS };
   const store = new CalendarStore(io, freshState(settings));
   const opened: string[] = [];
+  const trashed: string[] = [];
   const app = {
     vault: { getAbstractFileByPath: (path: string) => io.files.has(path) ? { path, extension: 'md' } : null },
     workspace: { getLeaf: () => ({ openFile: async (file: { path: string }) => { opened.push(file.path); } }) },
+    fileManager: { trashFile: async (file: { path: string }) => { trashed.push(file.path); io.files.delete(file.path); } },
   } as unknown as App;
-  return { io, store, service: new EventNoteService(app, store), opened };
+  return { io, store, service: new EventNoteService(app, store), opened, trashed };
 }
 
 const start = '2026-10-22T10:00:00+08:00';
@@ -954,4 +956,129 @@ test('a chosen leaf receives Event, Daily, and Weekly Notes instead of a new tab
   const weekly = await service.openWeekly('2026-10-22', target);
   assert.deepEqual(beside, [eventPath, daily, weekly]);
   assert.deepEqual(opened, []);
+});
+
+test('notes sharing an event_id are reported as one problem, and keeping one fixes it', async () => {
+  const { io, service, store, trashed } = setup();
+  const event = await service.createLocal({ title: 'Roadmap', start, end });
+  const link = store.state.noteLinks[event.id];
+  const original = io.files.get(link.eventPath)!;
+  io.files.set('Copies/Roadmap 1.md', original);
+  io.files.set('Copies/Roadmap 2.md', `${original}Notes only in this copy.\n`);
+  await service.scanEvents();
+  assert.equal(service.problems.length, 1);
+  const [problem] = service.problems;
+  assert.equal(problem.kind, 'duplicate');
+  assert.deepEqual([...problem.paths].sort(), [link.eventPath, 'Copies/Roadmap 1.md', 'Copies/Roadmap 2.md'].sort());
+  const facts = await service.inspectNotes(problem.paths);
+  assert.deepEqual(facts.filter(note => note.linked).map(note => note.path), [link.eventPath]);
+  assert.deepEqual(facts.filter(note => note.listed).map(note => note.path), [link.eventPath]);
+  const seen = Object.fromEntries(facts.map(note => [note.path, note.content]));
+  // A note edited after the user compared it is never overwritten.
+  io.files.set('Copies/Roadmap 1.md', `${original}Typed meanwhile.\n`);
+  await assert.rejects(service.resolveDuplicate(link.eventPath, [{ path: 'Copies/Roadmap 1.md', action: 'trash' }], seen), /changed after you reviewed it/);
+  assert.equal(io.files.get('Copies/Roadmap 1.md'), `${original}Typed meanwhile.\n`);
+  io.files.set('Copies/Roadmap 1.md', original);
+  await service.resolveDuplicate(link.eventPath, [
+    { path: 'Copies/Roadmap 1.md', action: 'trash' },
+    { path: 'Copies/Roadmap 2.md', action: 'merge' },
+  ], seen);
+  assert.deepEqual(trashed, ['Copies/Roadmap 1.md', 'Copies/Roadmap 2.md']);
+  assert.match(io.files.get(link.eventPath)!, /## Merged from Roadmap 2\n\nNotes only in this copy\.\n$/);
+  const scanned = await service.scanEvents();
+  assert.deepEqual(service.problems, []);
+  assert.deepEqual(scanned.map(item => item.id), [event.id]);
+});
+
+test('keeping a copy instead of the linked note moves the Daily entry to it', async () => {
+  const { io, service, store } = setup();
+  const event = await service.createLocal({ title: 'Roadmap', start, end });
+  const link = store.state.noteLinks[event.id];
+  io.files.set('Projects/Roadmap.md', `${io.files.get(link.eventPath)!}Better notes.\n`);
+  await service.scanEvents();
+  assert.equal(service.problems[0].kind, 'duplicate');
+  await service.resolveDuplicate('Projects/Roadmap.md', [{ path: link.eventPath, action: 'detach' }]);
+  assert.equal(parseEventNote(io.files.get(link.eventPath)!, link.eventPath), null);
+  assert.equal(io.files.get(link.eventPath), '');
+  const moved = store.state.noteLinks[event.id];
+  assert.equal(moved.eventPath, 'Projects/Roadmap.md');
+  const daily = io.files.get(moved.dailyPath)!;
+  assert.equal(daily.split('[[').length - 1, 1);
+  assert.match(daily, /\[\[Projects\/Roadmap\|Roadmap\]\]/);
+  await service.scanEvents();
+  assert.deepEqual(service.problems, []);
+});
+
+test('copies of a reconnected note are grouped with the note that holds the event', async () => {
+  const { io, service, store, old, current, resubscribe, trashed } = resubscribed();
+  const path = await service.openEvent(old);
+  const copies = ['Calendar Notes/FW Meeting 1.md', 'Calendar Notes/FW Meeting 2.md'];
+  for (const copy of copies) io.files.set(copy, io.files.get(path)!);
+  delete store.state.sourceCaches.old;
+  resubscribe();
+  store.state.sourceCaches.new = { ...emptySourceCache(), accepted: { [current.id]: { event: current, revision: 0 } } };
+  await service.scanEvents();
+  assert.deepEqual(service.problems.map(problem => [problem.kind, problem.holder, problem.paths]), [['duplicate', path, [path, ...copies]]]);
+  await service.resolveDuplicate(path, copies.map(copy => ({ path: copy, action: 'trash' as const })));
+  assert.deepEqual(trashed, copies);
+  await service.scanEvents();
+  assert.deepEqual(service.problems, []);
+  assert.equal(parseEventNote(io.files.get(path)!, path)?.id, current.id);
+});
+
+test('a note its calendar no longer lists can be kept as an ordinary note', async () => {
+  const { io, service, store, old } = resubscribed();
+  const path = await service.openEvent(old);
+  io.files.set(path, `${io.files.get(path)!}Minutes.\n`);
+  store.state.sourceCaches.old = { ...emptySourceCache(), accepted: {} };
+  await service.scanEvents();
+  assert.deepEqual(service.problems.map(problem => [problem.kind, problem.sourceId]), [['unlisted', 'old']]);
+  await service.releaseNote(path, 'detach');
+  assert.equal(io.files.get(path), '# FW: Meeting\n\nMinutes.\n');
+  assert.equal(store.state.noteLinks[old.id], undefined);
+  assert.equal(store.state.pathTypes['calendar notes/fw meeting.md'], undefined);
+  await service.scanEvents();
+  assert.deepEqual(service.problems, []);
+});
+
+test('a removed calendar note matched by two calendars is given to the one the user picks', async () => {
+  const { io, service, store, old, current, resubscribe } = resubscribed();
+  const path = await service.openEvent(old);
+  delete store.state.sourceCaches.old;
+  resubscribe();
+  const other = { ...current, id: sourceEventId('home', 'uid-fw'), sourceId: 'home' };
+  store.state.settings = { ...store.state.settings, sources: [...store.state.settings.sources,
+    { id: 'home', name: 'Home', url: 'https://example.test/home.ics', color: '#654321', enabled: true }] };
+  store.state.sourceCaches.new = { ...emptySourceCache(), accepted: { [current.id]: { event: current, revision: 0 } } };
+  store.state.sourceCaches.home = { ...emptySourceCache(), accepted: { [other.id]: { event: other, revision: 0 } } };
+  await service.scanEvents();
+  const [problem] = service.problems;
+  assert.equal(problem.kind, 'orphan');
+  assert.deepEqual(problem.candidates?.map(candidate => candidate.sourceId).sort(), ['home', 'new']);
+  await service.reconnectNote(path, other.id);
+  assert.equal(parseEventNote(io.files.get(path)!, path)?.id, other.id);
+  await service.scanEvents();
+  assert.deepEqual(service.problems, []);
+});
+
+test('hand-edited event properties can be put back from the last valid version', async () => {
+  const { io, service } = setup();
+  const event = await service.createLocal({ title: 'Roadmap', start, end });
+  await service.scanEvents();
+  const path = 'Calendar Notes/Roadmap.md';
+  const valid = io.files.get(path)!;
+  io.files.set(path, valid.replace(/end: "[^"]+"/, 'end: "2026-10-22T10:05:00+08:00"'));
+  let scanned = await service.scanEvents();
+  assert.equal(service.problems[0].kind, 'invalid');
+  assert.equal(service.problems[0].lastValid?.end, end);
+  assert.equal(scanned.length, 1);
+  await service.restoreNote(path);
+  assert.equal(io.files.get(path), valid);
+  io.files.set(path, valid.replace(/event_id: "[^"]+"\n/, ''));
+  scanned = await service.scanEvents();
+  assert.deepEqual(service.problems.map(problem => problem.kind), ['missing-id']);
+  await service.restoreNote(path);
+  assert.equal(parseEventNote(io.files.get(path)!, path)?.id, event.id);
+  await service.scanEvents();
+  assert.deepEqual(service.problems, []);
 });
