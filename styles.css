@@ -78,6 +78,9 @@
 .cn-title-field label { display: flex; flex-direction: column; gap: 6px; font-weight: 600; }
 .cn-title-field .cn-event-title { box-sizing: border-box; width: 100%; min-height: 40px; padding: 8px 10px; font-size: 1rem; }
 .cn-modal-field input { width: 100%; }
+.cn-event-original { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; margin: 10px 0; }
+.cn-event-original dt { color: var(--text-muted); font-size: var(--font-ui-small); }
+.cn-event-original dd { margin: 0; max-height: 12em; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .cn-validation { color: var(--text-error); margin: 8px 0; }
 .cn-modal-actions { justify-content: flex-end; margin-top: 16px; }
 .cn-history-entry { border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 12px; margin: 12px 0; line-height: 1.6; overflow-wrap: anywhere; }

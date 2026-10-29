@@ -449,7 +449,7 @@ export class EventNoteService {
     return orphans.find(orphan => orphan.path === path);
   }
 
-  async openEvent(clicked: CalendarEvent, choose?: ChooseNote): Promise<string> {
+  async openEvent(clicked: CalendarEvent, choose?: ChooseNote, target?: () => WorkspaceLeaf): Promise<string> {
     return this.serialized(async () => {
       const event = await this.adoptOrphanNote(clicked, choose);
       const path = await this.availableEventPath(event);
@@ -458,7 +458,7 @@ export class EventNoteService {
       }
       const plan = await this.planEventWrites(event, { addMissing: true });
       await this.store.commit(plan.writes, state => { state.noteLinks[event.id] = plan.link; });
-      await this.openPath(plan.notePath);
+      await this.openPath(plan.notePath, target);
       return plan.notePath;
     });
   }

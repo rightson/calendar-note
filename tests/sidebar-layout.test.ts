@@ -58,3 +58,11 @@ test('saved main calendar collapse survives normalization but never hides both p
   assert.equal(both.sidebarCollapsed, true);
   assert.equal(both.mainCollapsed, false);
 });
+
+test('event clicks show details by default and keep a valid saved choice', () => {
+  assert.equal(DEFAULT_SETTINGS.eventClickAction, 'dialog');
+  assert.equal(normalizePluginSettings({}).eventClickAction, 'dialog');
+  assert.equal(normalizePluginSettings({ eventClickAction: 'split' }).eventClickAction, 'split');
+  assert.equal(normalizePluginSettings({ eventClickAction: 'tab' }).eventClickAction, 'tab');
+  assert.equal(normalizePluginSettings({ eventClickAction: 'popup' }).eventClickAction, 'dialog');
+});

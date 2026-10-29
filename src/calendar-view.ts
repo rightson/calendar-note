@@ -220,16 +220,13 @@ export class CalendarNoteView extends ItemView {
       eventDidMount: arg => {
         const event = this.plugin.eventById(arg.event.id);
         if (!event) return;
-        arg.el.setAttribute('aria-label', `${event.title}. Open Event Note.`);
+        arg.el.setAttribute('aria-label', `${event.title}. ${this.settings.eventClickAction === 'dialog' ? 'Show event details.' : 'Open Event Note.'}`);
         const details = document.createElement('button');
         details.className = 'cn-event-details';
         details.textContent = '⋯';
         details.type = 'button';
         details.setAttribute('aria-label', `Details and edit: ${event.title}`);
-        details.addEventListener('click', e => { e.stopPropagation(); new EventModal(this.app, this.settings, async value => {
-          if (value.title !== event.title) { new Notice('Edit the Event Note title in Obsidian.'); return; }
-          await this.plugin.reschedule(event, value.interval);
-        }, event, undefined, { path: this.plugin.store.state.noteLinks[event.id]?.eventPath, change: () => void this.changeEventNote(event) }).open(); });
+        details.addEventListener('click', e => { e.stopPropagation(); this.showEventDetails(event); });
         arg.el.appendChild(details);
         arg.el.addEventListener('contextmenu', e => {
           e.preventDefault(); e.stopPropagation(); this.newEvent(this.pointerInterval(e.clientX, e.clientY, event));
@@ -381,9 +378,9 @@ export class CalendarNoteView extends ItemView {
   private get miniOnly(): boolean { return this.settings.mainCollapsed && !this.settings.sidebarCollapsed; }
   /** With only the mini calendar showing, notes open in a split beside it instead of a new tab. */
   private noteTarget(): (() => WorkspaceLeaf) | undefined {
-    if (!this.miniOnly) return undefined;
-    return () => (this.noteLeaf = noteSplitLeaf(this.app.workspace, this.leaf, this.noteLeaf));
+    return this.miniOnly ? this.besideTarget : undefined;
   }
+  private readonly besideTarget = (): WorkspaceLeaf => (this.noteLeaf = noteSplitLeaf(this.app.workspace, this.leaf, this.noteLeaf));
   private async openWeek(day: string): Promise<void> { await this.plugin.runAction(() => this.plugin.notes.openWeekly(day, this.noteTarget())); }
   private async openDay(day: string): Promise<void> { this.selectedDay = day; this.renderMini(); await this.plugin.runAction(() => this.plugin.notes.openDaily(day, this.noteTarget())); }
   private renderMini(): void {
@@ -540,7 +537,27 @@ export class CalendarNoteView extends ItemView {
     arg.jsEvent.preventDefault();
     if (Date.now() - this.lastDragAt < 600) return;
     const event = this.plugin.eventById(arg.event.id);
-    if (event) void this.plugin.runAction(() => this.plugin.notes.openEvent(event, paths => new NoteChoiceModal(this.app, paths).choose()));
+    if (!event) return;
+    switch (this.settings.eventClickAction) {
+      case 'split': this.openEventNote(event, this.besideTarget); break;
+      case 'tab': this.openEventNote(event); break;
+      default: this.showEventDetails(event);
+    }
+  }
+  private openEventNote(event: CalendarEvent, target?: () => WorkspaceLeaf): void {
+    void this.plugin.runAction(() => this.plugin.notes.openEvent(event, paths => new NoteChoiceModal(this.app, paths).choose(), target));
+  }
+  private showEventDetails(event: CalendarEvent): void {
+    new EventModal(this.app, this.settings, async value => {
+      if (value.title !== event.title) { new Notice('Edit the Event Note title in Obsidian.'); return; }
+      await this.plugin.reschedule(event, value.interval);
+    }, event, undefined, {
+      path: this.plugin.store.state.noteLinks[event.id]?.eventPath,
+      change: () => void this.changeEventNote(event),
+      calendar: this.settings.sources.find(source => source.id === event.sourceId)?.name,
+      openBeside: () => this.openEventNote(event, this.besideTarget),
+      openTab: () => this.openEventNote(event),
+    }).open();
   }
   private async changeEventNote(event: CalendarEvent): Promise<void> {
     const current = this.plugin.store.state.noteLinks[event.id]?.eventPath;

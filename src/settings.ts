@@ -1,11 +1,12 @@
 import type { App } from 'obsidian';
-import type { EventPropertiesDefault, PluginSettings, ResolvedNoteSettings, WeekRules, WeekStart } from './types';
+import type { EventClickAction, EventPropertiesDefault, PluginSettings, ResolvedNoteSettings, WeekRules, WeekStart } from './types';
 import { normalizeSidebarWidth, SIDEBAR_DEFAULT_WIDTH } from './sidebar-layout';
 
 export const DEFAULT_SETTINGS: PluginSettings = {
   sources: [],
   eventPattern: '[Calendar Notes]/{title}',
   eventPropertiesDefault: 'collapsed',
+  eventClickAction: 'dialog',
   dailyFolder: 'Daily Notes',
   dailyFormat: 'YYYY-MM-DD',
   dailyTemplate: '',
@@ -46,7 +47,12 @@ export function normalizePluginSettings(raw: unknown, fallback: PluginSettings =
     workdaysOnly: typeof input.workdaysOnly === 'boolean' ? input.workdaysOnly : fallback.workdaysOnly,
     eventPropertiesDefault: isEventPropertiesDefault(input.eventPropertiesDefault)
       ? input.eventPropertiesDefault : fallback.eventPropertiesDefault,
+    eventClickAction: isEventClickAction(input.eventClickAction) ? input.eventClickAction : fallback.eventClickAction,
   };
+}
+
+export function isEventClickAction(value: unknown): value is EventClickAction {
+  return value === 'dialog' || value === 'split' || value === 'tab';
 }
 
 export function isEventPropertiesDefault(value: unknown): value is EventPropertiesDefault {

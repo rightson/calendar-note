@@ -2,7 +2,7 @@ import { Notice, PluginSettingTab, Setting, type App, type ToggleComponent } fro
 import moment from 'moment-timezone';
 import type CalendarNotePlugin from './main';
 import type { CalendarSource, PluginSettings } from './types';
-import { isEventPropertiesDefault, resolveDailySettings, resolveWeeklySettings } from './settings';
+import { isEventClickAction, isEventPropertiesDefault, resolveDailySettings, resolveWeeklySettings } from './settings';
 import { dailyNotePath, eventNotePath, weeklyNotePath, folderPath } from './paths';
 import { patchSubscription, subscriptionStatus } from './subscription-settings';
 
@@ -17,6 +17,7 @@ export function validatePluginSettings(app: App, settings: PluginSettings): { ev
   if (!Number.isInteger(settings.syncIntervalMinutes) || settings.syncIntervalMinutes < 1 || settings.syncIntervalMinutes > 1440) throw new Error('Sync interval must be 1–1440 minutes.');
   if (!Number.isInteger(settings.customDays) || settings.customDays < 2 || settings.customDays > 14) throw new Error('Custom days must be 2–14.');
   if (!isEventPropertiesDefault(settings.eventPropertiesDefault)) throw new Error('Choose a valid Event Note Properties default.');
+  if (!isEventClickAction(settings.eventClickAction)) throw new Error('Choose a valid event click action.');
   folderPath(settings.dailyFolder); folderPath(settings.weeklyFolder);
   const event = eventNotePath(sample, 'Local', settings);
   const daily = dailyNotePath('2026-10-23', app, settings);
@@ -78,6 +79,9 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
     this.dropdown(root, 'Snap interval', 'snapMinutes', [['5', '5 minutes'], ['10', '10 minutes'], ['15', '15 minutes'], ['20', '20 minutes'], ['30', '30 minutes'], ['60', '60 minutes']]);
     this.number(root, 'Default event duration (minutes)', 'defaultDurationMinutes');
     this.number(root, 'Custom view days', 'customDays');
+    this.dropdown(root, 'Clicking an event', 'eventClickAction', [
+      ['dialog', 'Show event details'], ['split', 'Open Event Note beside the calendar'], ['tab', 'Open Event Note in a new tab'],
+    ], 'The event details dialog can still open the Event Note either way.');
     new Setting(root).setName('Subscriptions').setHeading();
     this.number(root, 'Refresh interval (minutes)', 'syncIntervalMinutes');
     for (const source of settings.sources) this.sourceSetting(root, source);
@@ -159,7 +163,7 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
       input.inputEl.addEventListener('keydown', e => { if (e.key === 'Enter') input.inputEl.blur(); });
     });
   }
-  private dropdown(root: HTMLElement, name: string, key: 'weekMode' | 'weekStart' | 'snapMinutes' | 'eventPropertiesDefault', values: [string, string][], description?: string): void {
+  private dropdown(root: HTMLElement, name: string, key: 'weekMode' | 'weekStart' | 'snapMinutes' | 'eventPropertiesDefault' | 'eventClickAction', values: [string, string][], description?: string): void {
     const setting = new Setting(root).setName(name);
     if (description) setting.setDesc(description);
     setting.addDropdown(select => {
