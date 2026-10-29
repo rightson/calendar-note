@@ -142,7 +142,10 @@ export class EventNoteService {
   private async openPath(path: string, target?: () => WorkspaceLeaf): Promise<void> {
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!file || !('extension' in file) || file.extension !== 'md') throw new Error(`Note is unavailable: ${path}`);
-    await (target?.() ?? this.app.workspace.getLeaf(true)).openFile(file as TFile);
+    const leaf = target?.() ?? this.app.workspace.getLeaf(true);
+    await leaf.openFile(file as TFile);
+    // A tab added to another pane is not necessarily the one it shows.
+    if (target) await this.app.workspace.revealLeaf(leaf);
   }
 
   async scanEvents(): Promise<CalendarEvent[]> {

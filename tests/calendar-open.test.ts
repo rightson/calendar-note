@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Workspace, WorkspaceLeaf } from 'obsidian';
-import { calendarOpenModeForClick, noteSplitLeaf, openCalendarLeaf } from '../src/calendar-open';
+import { calendarOpenModeForClick, noteSplitLeaf, oppositeTabLeaf, openCalendarLeaf } from '../src/calendar-open';
 
 const viewType = 'calendar-note-view';
 
@@ -59,31 +59,114 @@ test('modified opening creates a vertical split to the right before revealing it
   assert.deepEqual(calls, ['getLeaf:split:vertical', `setViewState:${viewType}:true`, 'revealLeaf']);
 });
 
-function splitWorkspace(leaves: object[]) {
+type Item = { name?: string; parent?: Item | null; children?: Item[]; direction?: string; activeTime?: number; getRoot?: () => Item };
+
+/** A minimal Obsidian layout tree: splits and tab groups hold children; leaves know their root. */
+function layout() {
+  const rootSplit: Item = { name: 'root', parent: null, children: [], direction: 'vertical' };
+  const rightSplit: Item = { name: 'right sidebar', parent: null, children: [], direction: 'horizontal' };
+  const leftSplit: Item = { name: 'left sidebar', parent: null, children: [], direction: 'horizontal' };
+  const add = (parent: Item, item: Item) => { item.parent = parent; parent.children!.push(item); return item; };
+  const rootOf = (item: Item) => { let node = item; while (node.parent) node = node.parent; return node; };
+  const leaf = (tabs: Item, name: string, activeTime = 0) => add(tabs, { name, activeTime, getRoot() { return rootOf(this as Item); } });
+  const tabs = (parent: Item) => add(parent, { children: [] });
+  const leaves = () => {
+    const all: Item[] = [];
+    const walk = (item: Item) => item.children ? item.children.forEach(walk) : all.push(item);
+    [rootSplit, leftSplit, rightSplit].forEach(walk);
+    return all;
+  };
   const splits: Array<{ from: unknown; direction: string }> = [];
   const workspace = {
-    iterateAllLeaves(callback: (leaf: WorkspaceLeaf) => void) { leaves.forEach(leaf => callback(leaf as WorkspaceLeaf)); },
-    createLeafBySplit(from: WorkspaceLeaf, direction: string) {
+    rootSplit, leftSplit, rightSplit,
+    iterateAllLeaves(callback: (leaf: WorkspaceLeaf) => void) { leaves().forEach(item => callback(item as unknown as WorkspaceLeaf)); },
+    getMostRecentLeaf(root: Item) {
+      const inside = leaves().filter(item => { for (let node: Item | null | undefined = item; node; node = node.parent) if (node === root) return true; return false; });
+      return (inside.sort((a, b) => (b.activeTime ?? 0) - (a.activeTime ?? 0))[0] ?? null) as unknown as WorkspaceLeaf | null;
+    },
+    createLeafInParent(parent: Item, index: number) {
+      const created: Item = { name: 'new tab', parent, getRoot() { return rootOf(this as Item); } };
+      parent.children!.splice(index, 0, created);
+      return created as unknown as WorkspaceLeaf;
+    },
+    createLeafBySplit(from: Item, direction: string) {
       splits.push({ from, direction });
-      const leaf = { split: splits.length };
-      leaves.push(leaf);
-      return leaf as unknown as WorkspaceLeaf;
+      const split = add(from.parent!.parent!, { children: [] });
+      return leaf(split, `split ${splits.length}`) as unknown as WorkspaceLeaf;
     },
   } as unknown as Workspace;
-  return { workspace, splits };
+  return { workspace, rootSplit, leftSplit, rightSplit, tabs, leaf, splits };
 }
+const asLeaf = (item: Item) => item as unknown as WorkspaceLeaf;
 
-test('notes from the mini calendar alone open in one split beside it and reuse it while open', () => {
-  const calendar = { name: 'calendar' } as unknown as WorkspaceLeaf;
-  const leaves: object[] = [calendar];
-  const { workspace, splits } = splitWorkspace(leaves);
+test('a calendar on the right opens notes in a new tab of the pane on its left', () => {
+  const { workspace, rootSplit, tabs, leaf } = layout();
+  const left = tabs(rootSplit);
+  leaf(left, 'older', 1);
+  const recent = leaf(left, 'recent', 2);
+  const calendar = leaf(tabs(rootSplit), 'calendar', 3);
+  const opened = oppositeTabLeaf(workspace, asLeaf(calendar)) as unknown as Item;
+  assert.equal(opened.parent, left);
+  assert.equal(left.children!.indexOf(opened), left.children!.indexOf(recent) + 1);
+});
+
+test('a calendar on the left opens notes in the pane on its right', () => {
+  const { workspace, rootSplit, tabs, leaf } = layout();
+  const calendar = leaf(tabs(rootSplit), 'calendar');
+  const right = tabs(rootSplit);
+  leaf(right, 'note');
+  assert.equal((oppositeTabLeaf(workspace, asLeaf(calendar)) as unknown as Item).parent, right);
+});
+
+test('panes stacked above or below the calendar do not count as its far side', () => {
+  const { workspace, rootSplit, tabs, leaf } = layout();
+  const left = tabs(rootSplit);
+  leaf(left, 'note');
+  const column: Item = { parent: rootSplit, children: [], direction: 'horizontal' };
+  rootSplit.children!.push(column);
+  leaf(tabs(column), 'below');
+  const calendar = leaf(tabs(column), 'calendar');
+  assert.equal((oppositeTabLeaf(workspace, asLeaf(calendar)) as unknown as Item).parent, left);
+});
+
+test('a calendar in a sidebar opens notes in the main area', () => {
+  const { workspace, rootSplit, rightSplit, tabs, leaf } = layout();
+  const main = tabs(rootSplit);
+  leaf(main, 'note');
+  const calendar = leaf(tabs(rightSplit), 'calendar');
+  assert.equal((oppositeTabLeaf(workspace, asLeaf(calendar)) as unknown as Item).parent, main);
+});
+
+test('a calendar with nothing beside it has no far side', () => {
+  const { workspace, rootSplit, tabs, leaf } = layout();
+  const group = tabs(rootSplit);
+  leaf(group, 'note');
+  const calendar = leaf(group, 'calendar');
+  assert.equal(oppositeTabLeaf(workspace, asLeaf(calendar)), undefined);
+});
+
+test('notes beside a lone calendar open in one split of it and reuse it while open', () => {
+  const { workspace, rootSplit, tabs, leaf, splits } = layout();
+  const calendar = asLeaf(leaf(tabs(rootSplit), 'calendar'));
   const first = noteSplitLeaf(workspace, calendar);
   assert.deepEqual(splits, [{ from: calendar, direction: 'vertical' }]);
   assert.equal(noteSplitLeaf(workspace, calendar, first), first);
   assert.equal(splits.length, 1);
-  leaves.splice(leaves.indexOf(first), 1);
+  const group = (first as unknown as Item).parent!;
+  rootSplit.children!.splice(rootSplit.children!.indexOf(group), 1);
   const second = noteSplitLeaf(workspace, calendar, first);
   assert.notEqual(second, first);
   assert.equal(splits.length, 2);
   assert.notEqual(noteSplitLeaf(workspace, calendar, calendar), calendar);
+});
+
+test('notes beside a calendar use the pane already on its far side instead of splitting it', () => {
+  const { workspace, rootSplit, tabs, leaf, splits } = layout();
+  const left = tabs(rootSplit);
+  leaf(left, 'note');
+  const calendar = asLeaf(leaf(tabs(rootSplit), 'calendar'));
+  const first = noteSplitLeaf(workspace, calendar);
+  assert.equal((first as unknown as Item).parent, left);
+  assert.equal(noteSplitLeaf(workspace, calendar, first), first);
+  assert.equal(splits.length, 0);
 });

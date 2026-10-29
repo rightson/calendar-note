@@ -42,12 +42,16 @@ function setup(io = new FakeVault()) {
   const store = new CalendarStore(io, freshState(settings));
   const opened: string[] = [];
   const trashed: string[] = [];
+  const revealed: unknown[] = [];
   const app = {
     vault: { getAbstractFileByPath: (path: string) => io.files.has(path) ? { path, extension: 'md' } : null },
-    workspace: { getLeaf: () => ({ openFile: async (file: { path: string }) => { opened.push(file.path); } }) },
+    workspace: {
+      getLeaf: () => ({ openFile: async (file: { path: string }) => { opened.push(file.path); } }),
+      revealLeaf: async (leaf: unknown) => { revealed.push(leaf); },
+    },
     fileManager: { trashFile: async (file: { path: string }) => { trashed.push(file.path); io.files.delete(file.path); } },
   } as unknown as App;
-  return { io, store, service: new EventNoteService(app, store), opened, trashed };
+  return { io, store, service: new EventNoteService(app, store), opened, trashed, revealed };
 }
 
 const start = '2026-10-22T10:00:00+08:00';
@@ -946,15 +950,17 @@ test('detaching an Event Note drops only managed properties', () => {
   assert.deepEqual(managedEventKeys(note), ['event_id', 'start', 'end']);
 });
 
-test('a chosen leaf receives Event, Daily, and Weekly Notes instead of a new tab', async () => {
-  const { service, opened } = setup();
+test('a chosen leaf receives and shows Event, Daily, and Weekly Notes instead of a new tab', async () => {
+  const { service, opened, revealed } = setup();
   const beside: string[] = [];
-  const target = () => ({ openFile: async (file: { path: string }) => { beside.push(file.path); } }) as never;
+  const leaf = { openFile: async (file: { path: string }) => { beside.push(file.path); } };
+  const target = () => leaf as never;
   const event = await service.createLocal({ title: 'Beside', start, end });
   const eventPath = await service.openEvent(event, undefined, target);
   const daily = await service.openDaily('2026-10-22', target);
   const weekly = await service.openWeekly('2026-10-22', target);
   assert.deepEqual(beside, [eventPath, daily, weekly]);
+  assert.deepEqual(revealed, [leaf, leaf, leaf]);
   assert.deepEqual(opened, []);
 });
 

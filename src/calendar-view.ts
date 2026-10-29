@@ -14,7 +14,7 @@ import type CalendarNotePlugin from './main';
 import { EventModal, LinkNoteModal, NoteChoiceModal } from './modals';
 import { miniMonthColumns, visibleMonthCount } from './calendar-layout';
 import { editMenuTitle, eventsAt, type PointerSpan } from './calendar-menu';
-import { noteSplitLeaf } from './calendar-open';
+import { noteSplitLeaf, oppositeTabLeaf } from './calendar-open';
 import { sidebarWidthForContainer, resizeSidebarWithKeyboard, togglePanel, type CalendarPanel } from './sidebar-layout';
 import { subscriptionFailureMessage } from './subscription-settings';
 
@@ -381,10 +381,12 @@ export class CalendarNoteView extends ItemView {
     if (week.start === weekInfo(this.today(), resolveWeekRules(this.app, this.settings), this.settings.timeZone).start) button.addClass('is-current-week');
   }
   private get miniOnly(): boolean { return this.settings.mainCollapsed && !this.settings.sidebarCollapsed; }
-  /** With only the mini calendar showing, notes open in a split beside it instead of a new tab. */
-  private noteTarget(): (() => WorkspaceLeaf) | undefined {
-    return this.miniOnly ? this.besideTarget : undefined;
+  /** With only the mini calendar showing, notes open in one reused leaf beside it instead of a new tab. */
+  private noteTarget(): () => WorkspaceLeaf {
+    return this.miniOnly ? this.besideTarget : this.tabTarget;
   }
+  /** New tabs go on the far side of the calendar when a pane is there, so the calendar stays in view. */
+  private readonly tabTarget = (): WorkspaceLeaf => oppositeTabLeaf(this.app.workspace, this.leaf) ?? this.app.workspace.getLeaf('tab');
   private readonly besideTarget = (): WorkspaceLeaf => (this.noteLeaf = noteSplitLeaf(this.app.workspace, this.leaf, this.noteLeaf));
   private async openWeek(day: string): Promise<void> { await this.plugin.runAction(() => this.plugin.notes.openWeekly(day, this.noteTarget())); }
   private async openDay(day: string): Promise<void> { this.selectedDay = day; this.renderMini(); await this.plugin.runAction(() => this.plugin.notes.openDaily(day, this.noteTarget())); }
@@ -549,11 +551,11 @@ export class CalendarNoteView extends ItemView {
     if (!event) return;
     switch (this.settings.eventClickAction) {
       case 'split': this.openEventNote(event, this.besideTarget); break;
-      case 'tab': this.openEventNote(event); break;
+      case 'tab': this.openEventNote(event, this.tabTarget); break;
       default: this.showEventDetails(event);
     }
   }
-  private openEventNote(event: CalendarEvent, target?: () => WorkspaceLeaf): void {
+  private openEventNote(event: CalendarEvent, target: () => WorkspaceLeaf): void {
     void this.plugin.runAction(() => this.plugin.notes.openEvent(event, paths => new NoteChoiceModal(this.app, paths).choose(), target));
   }
   private showEventDetails(event: CalendarEvent): void {
@@ -565,7 +567,7 @@ export class CalendarNoteView extends ItemView {
       change: () => void this.changeEventNote(event),
       calendar: this.settings.sources.find(source => source.id === event.sourceId)?.name,
       openBeside: () => this.openEventNote(event, this.besideTarget),
-      openTab: () => this.openEventNote(event),
+      openTab: () => this.openEventNote(event, this.tabTarget),
     }).open();
   }
   /** Right-click: add an event here, or edit any event shown under the pointer. */
