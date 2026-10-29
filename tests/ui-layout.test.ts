@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { visibleMonthCount } from '../src/calendar-layout';
+import { miniMonthColumns, visibleMonthCount } from '../src/calendar-layout';
 
 test('mini calendar shows all complete months that fit and keeps one at small heights', () => {
   assert.equal(visibleMonthCount(900, 250), 3);
@@ -13,4 +13,13 @@ test('mini calendar bounds very tall or unmeasured layouts', () => {
   assert.equal(visibleMonthCount(3000, 250), 6);
   assert.equal(visibleMonthCount(800, 0), 1);
   assert.equal(visibleMonthCount(Number.NaN, 250), 1);
+});
+
+test('a full-width mini calendar lays months out in as many columns as fit', () => {
+  assert.equal(miniMonthColumns(260), 1);
+  assert.equal(miniMonthColumns(460), 2);
+  assert.equal(miniMonthColumns(459), 1);
+  assert.equal(miniMonthColumns(1000), 4);
+  assert.equal(miniMonthColumns(0), 1);
+  assert.equal(miniMonthColumns(Number.NaN), 1);
 });

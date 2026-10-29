@@ -10,6 +10,13 @@
 .cn-shell.is-sidebar-collapsed .cn-sidebar, .cn-shell.is-sidebar-collapsed .cn-sidebar-resizer { display: none; }
 .cn-shell.is-sidebar-overlay .cn-sidebar { position: absolute; z-index: 10; top: 0; left: 0; box-shadow: 4px 0 16px rgba(0,0,0,.2); }
 .cn-shell.is-sidebar-overlay .cn-sidebar-resizer { display: none; }
+.cn-main-restore { display: none; position: absolute; z-index: 11; top: 18px; right: -16px; box-sizing: border-box; width: 26px; height: 30px; min-width: 0; padding: 4px; align-items: center; justify-content: center; }
+.cn-main-restore svg, .cn-main-collapse svg { width: 16px; height: 16px; }
+.cn-main-collapse { display: inline-flex; align-items: center; justify-content: center; }
+.cn-shell.is-main-collapsed .cn-main-restore { display: inline-flex; }
+.cn-shell.is-main-collapsed .cn-content, .cn-shell.is-main-collapsed .cn-sidebar-resizer { display: none; }
+.cn-shell.is-main-collapsed .cn-sidebar { flex: 1 1 auto; }
+.cn-shell.is-main-collapsed .cn-mini { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); column-gap: 20px; align-content: start; }
 .cn-content { box-sizing: border-box; display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; flex: 1; padding: 16px 20px 18px; overflow: hidden; }
 .cn-toolbar, .cn-navigation, .cn-controls, .cn-mini-heading, .cn-history-tabs, .cn-history-actions, .cn-modal-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cn-toolbar { justify-content: space-between; margin-bottom: 12px; }
@@ -71,6 +78,9 @@
 .cn-title-field label { display: flex; flex-direction: column; gap: 6px; font-weight: 600; }
 .cn-title-field .cn-event-title { box-sizing: border-box; width: 100%; min-height: 40px; padding: 8px 10px; font-size: 1rem; }
 .cn-modal-field input { width: 100%; }
+.cn-event-original { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; margin: 10px 0; }
+.cn-event-original dt { color: var(--text-muted); font-size: var(--font-ui-small); }
+.cn-event-original dd { margin: 0; max-height: 12em; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .cn-validation { color: var(--text-error); margin: 8px 0; }
 .cn-modal-actions { justify-content: flex-end; margin-top: 16px; }
 .cn-history-entry { border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 12px; margin: 12px 0; line-height: 1.6; overflow-wrap: anywhere; }

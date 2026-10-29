@@ -32,6 +32,8 @@ export type WeekMode = 'calendar' | 'iso';
 export type WeekStart = 'locale' | 'sunday' | 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday';
 export type NoteProvider = 'calendar-note' | 'daily-notes' | 'periodic-notes' | 'calendar';
 export type EventPropertiesDefault = 'obsidian' | 'collapsed' | 'expanded';
+/** What clicking an event in the main calendar does. */
+export type EventClickAction = 'dialog' | 'split' | 'tab';
 
 export interface WeekRules {
   locale: string;
@@ -43,6 +45,7 @@ export interface PluginSettings extends WeekRules {
   sources: CalendarSource[];
   eventPattern: string;
   eventPropertiesDefault: EventPropertiesDefault;
+  eventClickAction: EventClickAction;
   dailyFolder: string;
   dailyFormat: string;
   dailyTemplate: string;
@@ -56,6 +59,7 @@ export interface PluginSettings extends WeekRules {
   customDays: number;
   sidebarWidth: number;
   sidebarCollapsed: boolean;
+  mainCollapsed: boolean;
   workdaysOnly: boolean;
 }
 

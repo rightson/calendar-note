@@ -1,4 +1,4 @@
-import type { App, TFile } from 'obsidian';
+import type { App, TFile, WorkspaceLeaf } from 'obsidian';
 import { dateAt, weekInfo } from './date';
 import { dailyNotePath, eventNotePath, weeklyNotePath } from './paths';
 import { resolveDailySettings, resolveWeeklySettings, resolveWeekRules } from './settings';
@@ -132,10 +132,10 @@ export class EventNoteService {
     return this.templateContent(provider.template, '## Weekly review\n\n', week.start);
   }
 
-  private async openPath(path: string): Promise<void> {
+  private async openPath(path: string, target?: () => WorkspaceLeaf): Promise<void> {
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!file || !('extension' in file) || file.extension !== 'md') throw new Error(`Note is unavailable: ${path}`);
-    await this.app.workspace.getLeaf(true).openFile(file as TFile);
+    await (target?.() ?? this.app.workspace.getLeaf(true)).openFile(file as TFile);
   }
 
   async scanEvents(): Promise<CalendarEvent[]> {
@@ -449,7 +449,7 @@ export class EventNoteService {
     return orphans.find(orphan => orphan.path === path);
   }
 
-  async openEvent(clicked: CalendarEvent, choose?: ChooseNote): Promise<string> {
+  async openEvent(clicked: CalendarEvent, choose?: ChooseNote, target?: () => WorkspaceLeaf): Promise<string> {
     return this.serialized(async () => {
       const event = await this.adoptOrphanNote(clicked, choose);
       const path = await this.availableEventPath(event);
@@ -458,7 +458,7 @@ export class EventNoteService {
       }
       const plan = await this.planEventWrites(event, { addMissing: true });
       await this.store.commit(plan.writes, state => { state.noteLinks[event.id] = plan.link; });
-      await this.openPath(plan.notePath);
+      await this.openPath(plan.notePath, target);
       return plan.notePath;
     });
   }
@@ -525,7 +525,8 @@ export class EventNoteService {
     });
   }
 
-  async openDaily(date: string): Promise<string> {
+  /** `target` picks the leaf to open in; a new tab otherwise. */
+  async openDaily(date: string, target?: () => WorkspaceLeaf): Promise<string> {
     return this.serialized(async () => {
       const settings = this.getSettings();
       const day = dateAt(date, settings.timeZone).format('YYYY-MM-DD');
@@ -534,12 +535,12 @@ export class EventNoteService {
       const existing = await this.store.io.read(path);
       const writes: PlannedWrite[] = existing === null ? [{ path, before: null, after: await this.initialDaily(day), type: 'daily' }] : [];
       await this.store.commit(writes, state => { state.pathTypes[pathKey(path)] = { type: 'daily' }; });
-      await this.openPath(path);
+      await this.openPath(path, target);
       return path;
     });
   }
 
-  async openWeekly(date: string): Promise<string> {
+  async openWeekly(date: string, target?: () => WorkspaceLeaf): Promise<string> {
     return this.serialized(async () => {
       const settings = this.getSettings();
       const path = weeklyNotePath(date, this.app, settings);
@@ -547,7 +548,7 @@ export class EventNoteService {
       const existing = await this.store.io.read(path);
       const writes: PlannedWrite[] = existing === null ? [{ path, before: null, after: await this.initialWeekly(date), type: 'weekly' }] : [];
       await this.store.commit(writes, state => { state.pathTypes[pathKey(path)] = { type: 'weekly' }; });
-      await this.openPath(path);
+      await this.openPath(path, target);
       return path;
     });
   }

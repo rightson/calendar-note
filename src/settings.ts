@@ -1,11 +1,12 @@
 import type { App } from 'obsidian';
-import type { EventPropertiesDefault, PluginSettings, ResolvedNoteSettings, WeekRules, WeekStart } from './types';
+import type { EventClickAction, EventPropertiesDefault, PluginSettings, ResolvedNoteSettings, WeekRules, WeekStart } from './types';
 import { normalizeSidebarWidth, SIDEBAR_DEFAULT_WIDTH } from './sidebar-layout';
 
 export const DEFAULT_SETTINGS: PluginSettings = {
   sources: [],
   eventPattern: '[Calendar Notes]/{title}',
   eventPropertiesDefault: 'collapsed',
+  eventClickAction: 'dialog',
   dailyFolder: 'Daily Notes',
   dailyFormat: 'YYYY-MM-DD',
   dailyTemplate: '',
@@ -22,6 +23,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   customDays: 3,
   sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
   sidebarCollapsed: false,
+  mainCollapsed: false,
   workdaysOnly: false,
 };
 
@@ -33,15 +35,24 @@ const string = (value: unknown, fallback = ''): string => typeof value === 'stri
 /** Coerce new layout preferences while retaining older plugin data without them. */
 export function normalizePluginSettings(raw: unknown, fallback: PluginSettings = DEFAULT_SETTINGS): PluginSettings {
   const input = record(raw) ?? {};
+  const sidebarCollapsed = typeof input.sidebarCollapsed === 'boolean' ? input.sidebarCollapsed : fallback.sidebarCollapsed;
+  const mainCollapsed = typeof input.mainCollapsed === 'boolean' ? input.mainCollapsed : fallback.mainCollapsed;
   return {
     ...fallback,
     ...input,
     sidebarWidth: normalizeSidebarWidth(input.sidebarWidth, fallback.sidebarWidth),
-    sidebarCollapsed: typeof input.sidebarCollapsed === 'boolean' ? input.sidebarCollapsed : fallback.sidebarCollapsed,
+    sidebarCollapsed,
+    // Both panels hidden would leave an empty view, so the main calendar wins.
+    mainCollapsed: mainCollapsed && !sidebarCollapsed,
     workdaysOnly: typeof input.workdaysOnly === 'boolean' ? input.workdaysOnly : fallback.workdaysOnly,
     eventPropertiesDefault: isEventPropertiesDefault(input.eventPropertiesDefault)
       ? input.eventPropertiesDefault : fallback.eventPropertiesDefault,
+    eventClickAction: isEventClickAction(input.eventClickAction) ? input.eventClickAction : fallback.eventClickAction,
   };
+}
+
+export function isEventClickAction(value: unknown): value is EventClickAction {
+  return value === 'dialog' || value === 'split' || value === 'tab';
 }
 
 export function isEventPropertiesDefault(value: unknown): value is EventPropertiesDefault {

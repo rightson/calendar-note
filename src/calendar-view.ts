@@ -12,9 +12,10 @@ import { resolveWeekRules } from './settings';
 import type { CalendarEvent, Interval, PluginSettings } from './types';
 import type CalendarNotePlugin from './main';
 import { EventModal, LinkNoteModal, NoteChoiceModal } from './modals';
-import { visibleMonthCount } from './calendar-layout';
+import { miniMonthColumns, visibleMonthCount } from './calendar-layout';
 import { editMenuTitle, eventsAt, type PointerSpan } from './calendar-menu';
-import { sidebarWidthForContainer, resizeSidebarWithKeyboard } from './sidebar-layout';
+import { noteSplitLeaf } from './calendar-open';
+import { sidebarWidthForContainer, resizeSidebarWithKeyboard, togglePanel, type CalendarPanel } from './sidebar-layout';
 import { subscriptionFailureMessage } from './subscription-settings';
 
 export const CALENDAR_VIEW_TYPE = 'calendar-note-calendar';
@@ -32,6 +33,9 @@ export class CalendarNoteView extends ItemView {
   private sidebarEl?: HTMLElement;
   private separatorEl?: HTMLElement;
   private sidebarRestore?: HTMLButtonElement;
+  private mainRestore?: HTMLButtonElement;
+  private mainCollapse?: HTMLButtonElement;
+  private noteLeaf?: WorkspaceLeaf;
   private workdaysToggle?: HTMLButtonElement;
   private shellResizeObserver?: ResizeObserver;
   private stopSidebarDrag?: () => void;
@@ -67,7 +71,12 @@ export class CalendarNoteView extends ItemView {
       type: 'button', 'aria-label': 'Show calendar sidebar', title: 'Show calendar sidebar', 'aria-expanded': 'false',
     } });
     setIcon(this.sidebarRestore, 'panel-left-open');
-    this.sidebarRestore.addEventListener('click', () => void this.toggleSidebar());
+    this.sidebarRestore.addEventListener('click', () => void this.togglePanel('sidebar'));
+    this.mainRestore = shell.createEl('button', { cls: 'cn-main-restore', attr: {
+      type: 'button', 'aria-label': 'Show main calendar', title: 'Show main calendar', 'aria-expanded': 'false',
+    } });
+    setIcon(this.mainRestore, 'panel-right-open');
+    this.mainRestore.addEventListener('click', () => void this.togglePanel('main'));
     const sidebar = shell.createDiv({ cls: 'cn-sidebar' });
     this.sidebarEl = sidebar;
     const miniHeading = sidebar.createDiv({ cls: 'cn-mini-heading' });
@@ -81,8 +90,7 @@ export class CalendarNoteView extends ItemView {
     miniPrev.addEventListener('click', () => { this.miniMonth = dateAt(this.miniMonth!, this.settings.timeZone).subtract(1, 'month').format('YYYY-MM-DD'); this.miniEl!.scrollTop = 0; this.renderMini(); });
     miniNext.addEventListener('click', () => { this.miniMonth = dateAt(this.miniMonth!, this.settings.timeZone).add(1, 'month').format('YYYY-MM-DD'); this.miniEl!.scrollTop = 0; this.renderMini(); });
     miniToday.addEventListener('click', () => this.navigateToday());
-    miniCollapse.addEventListener('click', () => void this.toggleSidebar());
-    this.miniNavTitle.title = 'Dates navigate the calendar. Week numbers open Weekly Notes.';
+    miniCollapse.addEventListener('click', () => void this.togglePanel('sidebar'));
     this.miniResizeObserver = new ResizeObserver(() => {
       if (this.miniResizeFrame) cancelAnimationFrame(this.miniResizeFrame);
       this.miniResizeFrame = requestAnimationFrame(() => { this.miniResizeFrame = undefined; this.renderMini(); });
@@ -132,6 +140,10 @@ export class CalendarNoteView extends ItemView {
     this.button(controls, 'New event', () => this.newEvent());
     this.button(controls, 'Refresh', () => void this.plugin.refresh(true));
     this.historyEl = this.button(controls, 'History', () => this.plugin.showHistory());
+    this.mainCollapse = this.button(controls, '', () => void this.togglePanel('main'), 'Hide main calendar');
+    this.mainCollapse.addClass('cn-main-collapse');
+    this.mainCollapse.title = 'Hide main calendar';
+    setIcon(this.mainCollapse, 'panel-right-close');
     this.subscriptionFailureEl = content.createDiv({ cls: 'cn-subscription-failure', attr: { role: 'status', 'aria-live': 'polite' } });
     this.listDatesEl = content.createDiv({ cls: 'cn-list-dates' });
     const grid = content.createDiv({ cls: 'cn-calendar' });
@@ -209,13 +221,13 @@ export class CalendarNoteView extends ItemView {
       eventDidMount: arg => {
         const event = this.plugin.eventById(arg.event.id);
         if (!event) return;
-        arg.el.setAttribute('aria-label', `${event.title}. Open Event Note.`);
+        arg.el.setAttribute('aria-label', `${event.title}. ${this.settings.eventClickAction === 'dialog' ? 'Show event details.' : 'Open Event Note.'}`);
         const details = document.createElement('button');
         details.className = 'cn-event-details';
         details.textContent = '⋯';
         details.type = 'button';
         details.setAttribute('aria-label', `Details and edit: ${event.title}`);
-        details.addEventListener('click', e => { e.stopPropagation(); this.editEvent(event); });
+        details.addEventListener('click', e => { e.stopPropagation(); this.showEventDetails(event); });
         arg.el.appendChild(details);
         arg.el.addEventListener('contextmenu', e => {
           e.preventDefault(); e.stopPropagation(); this.showSlotMenu(e, event);
@@ -282,11 +294,16 @@ export class CalendarNoteView extends ItemView {
   private applySidebarLayout(requested = this.pendingSidebarWidth ?? this.settings.sidebarWidth): void {
     if (!this.shellEl || !this.sidebarEl || !this.separatorEl) return;
     const collapsed = this.settings.sidebarCollapsed;
+    const mainCollapsed = this.settings.mainCollapsed && !collapsed;
     const width = sidebarWidthForContainer(requested, this.shellEl.clientWidth);
-    const overlay = !collapsed && width === 0;
+    const overlay = !collapsed && !mainCollapsed && width === 0;
     this.shellEl.toggleClass('is-sidebar-collapsed', collapsed);
+    this.shellEl.toggleClass('is-main-collapsed', mainCollapsed);
     this.shellEl.toggleClass('is-sidebar-overlay', overlay);
-    this.sidebarEl.style.width = `${overlay ? Math.min(260, Math.max(0, this.shellEl.clientWidth - 16)) : width}px`;
+    this.sidebarEl.style.width = mainCollapsed ? '' : `${overlay ? Math.min(260, Math.max(0, this.shellEl.clientWidth - 16)) : width}px`;
+    if (this.miniNavTitle) this.miniNavTitle.title = mainCollapsed
+      ? 'Dates open Daily Notes and week numbers open Weekly Notes beside the calendar.'
+      : 'Dates navigate the calendar. Week numbers open Weekly Notes.';
     this.separatorEl.setAttribute('aria-valuenow', String(width || requested));
     this.updateDisplayControls();
     if (this.layoutResizeFrame) cancelAnimationFrame(this.layoutResizeFrame);
@@ -294,11 +311,12 @@ export class CalendarNoteView extends ItemView {
   }
   private updateDisplayControls(): void {
     this.sidebarRestore?.setAttribute('aria-expanded', String(!this.settings.sidebarCollapsed));
+    this.mainRestore?.setAttribute('aria-expanded', String(!this.settings.mainCollapsed));
     this.workdaysToggle?.setAttribute('aria-pressed', String(this.settings.workdaysOnly));
     this.workdaysToggle?.setAttribute('aria-label', this.settings.workdaysOnly ? 'Show all days in the main calendar' : 'Show workdays only in the main calendar');
     this.workdaysToggle?.toggleClass('is-active', this.settings.workdaysOnly);
   }
-  private async saveDisplaySettings(change: Partial<Pick<PluginSettings, 'sidebarWidth' | 'sidebarCollapsed' | 'workdaysOnly'>>): Promise<void> {
+  private async saveDisplaySettings(change: Partial<Pick<PluginSettings, 'sidebarWidth' | 'sidebarCollapsed' | 'mainCollapsed' | 'workdaysOnly'>>): Promise<void> {
     try {
       await this.plugin.store.commit([], state => { state.settings = { ...state.settings, ...change }; });
       for (const leaf of this.app.workspace.getLeavesOfType(CALENDAR_VIEW_TYPE)) {
@@ -309,9 +327,8 @@ export class CalendarNoteView extends ItemView {
       this.settingsChanged();
     }
   }
-  private async toggleSidebar(): Promise<void> {
-    const collapsed = !this.settings.sidebarCollapsed;
-    await this.saveDisplaySettings({ sidebarCollapsed: collapsed });
+  private async togglePanel(panel: CalendarPanel): Promise<void> {
+    await this.saveDisplaySettings(togglePanel(this.settings, panel));
   }
   private async toggleWorkdays(): Promise<void> {
     const workdaysOnly = !this.settings.workdaysOnly;
@@ -359,20 +376,27 @@ export class CalendarNoteView extends ItemView {
     button.title = button.getAttribute('aria-label') ?? '';
     if (week.start === weekInfo(this.today(), resolveWeekRules(this.app, this.settings), this.settings.timeZone).start) button.addClass('is-current-week');
   }
-  private async openWeek(day: string): Promise<void> { await this.plugin.runAction(() => this.plugin.notes.openWeekly(day)); }
-  private async openDay(day: string): Promise<void> { this.selectedDay = day; this.renderMini(); await this.plugin.runAction(() => this.plugin.notes.openDaily(day)); }
+  private get miniOnly(): boolean { return this.settings.mainCollapsed && !this.settings.sidebarCollapsed; }
+  /** With only the mini calendar showing, notes open in a split beside it instead of a new tab. */
+  private noteTarget(): (() => WorkspaceLeaf) | undefined {
+    return this.miniOnly ? this.besideTarget : undefined;
+  }
+  private readonly besideTarget = (): WorkspaceLeaf => (this.noteLeaf = noteSplitLeaf(this.app.workspace, this.leaf, this.noteLeaf));
+  private async openWeek(day: string): Promise<void> { await this.plugin.runAction(() => this.plugin.notes.openWeekly(day, this.noteTarget())); }
+  private async openDay(day: string): Promise<void> { this.selectedDay = day; this.renderMini(); await this.plugin.runAction(() => this.plugin.notes.openDaily(day, this.noteTarget())); }
   private renderMini(): void {
     if (!this.miniEl || !this.miniMonth) return;
     const first = dateAt(this.miniMonth, this.settings.timeZone).locale('en');
     this.miniNavTitle?.setText(first.format('MMM YYYY'));
     const previousScroll = this.miniEl.scrollTop;
     this.miniEl.empty();
-    const firstCard = this.renderMiniMonth(first, false);
+    const columns = this.miniOnly ? miniMonthColumns(this.miniEl.clientWidth) : 1;
+    const firstCard = this.renderMiniMonth(first, columns > 1);
     const nextCard = this.renderMiniMonth(first.clone().add(1, 'month'));
     const cardHeight = nextCard.getBoundingClientRect().height;
     const firstHeight = firstCard.getBoundingClientRect().height;
     const fit = visibleMonthCount(this.miniEl.clientHeight + Math.max(0, cardHeight - firstHeight), cardHeight);
-    const rendered = Math.min(6, fit + 2);
+    const rendered = columns > 1 ? Math.min(24, columns * (fit + 1)) : Math.min(6, fit + 2);
     for (let month = 2; month < rendered; month++) this.renderMiniMonth(first.clone().add(month, 'month'));
     this.miniEl.scrollTop = previousScroll;
   }
@@ -397,7 +421,11 @@ export class CalendarNoteView extends ItemView {
         const day = start.clone().add(row * 7 + col, 'days').format('YYYY-MM-DD');
         const td = tr.createEl('td');
         if (day.slice(0, 7) !== monthDate.format('YYYY-MM')) td.addClass('is-outside');
-        const button = this.button(td, String(Number(day.slice(-2))), () => { this.selectedDay = day; this.calendar?.gotoDate(day); this.renderMini(); }, `Navigate to ${day}`);
+        const miniOnly = this.miniOnly;
+        const button = this.button(td, String(Number(day.slice(-2))), () => {
+          this.selectedDay = day; this.calendar?.gotoDate(day); this.renderMini();
+          if (miniOnly) void this.openDay(day);
+        }, miniOnly ? `Open Daily Note for ${day}` : `Navigate to ${day}`);
         if (day === this.today()) button.addClass('is-today');
         if (day === this.selectedDay) button.addClass('is-selected');
       }
@@ -510,7 +538,27 @@ export class CalendarNoteView extends ItemView {
     arg.jsEvent.preventDefault();
     if (Date.now() - this.lastDragAt < 600) return;
     const event = this.plugin.eventById(arg.event.id);
-    if (event) void this.plugin.runAction(() => this.plugin.notes.openEvent(event, paths => new NoteChoiceModal(this.app, paths).choose()));
+    if (!event) return;
+    switch (this.settings.eventClickAction) {
+      case 'split': this.openEventNote(event, this.besideTarget); break;
+      case 'tab': this.openEventNote(event); break;
+      default: this.showEventDetails(event);
+    }
+  }
+  private openEventNote(event: CalendarEvent, target?: () => WorkspaceLeaf): void {
+    void this.plugin.runAction(() => this.plugin.notes.openEvent(event, paths => new NoteChoiceModal(this.app, paths).choose(), target));
+  }
+  private showEventDetails(event: CalendarEvent): void {
+    new EventModal(this.app, this.settings, async value => {
+      if (value.title !== event.title) { new Notice('Edit the Event Note title in Obsidian.'); return; }
+      await this.plugin.reschedule(event, value.interval);
+    }, event, undefined, {
+      path: this.plugin.store.state.noteLinks[event.id]?.eventPath,
+      change: () => void this.changeEventNote(event),
+      calendar: this.settings.sources.find(source => source.id === event.sourceId)?.name,
+      openBeside: () => this.openEventNote(event, this.besideTarget),
+      openTab: () => this.openEventNote(event),
+    }).open();
   }
   /** Right-click: add an event here, or edit any event shown under the pointer. */
   private showSlotMenu(e: MouseEvent, clicked?: CalendarEvent): void {
@@ -520,15 +568,9 @@ export class CalendarNoteView extends ItemView {
     const events = eventsAt(this.plugin.events, span, this.settings.timeZone, clicked);
     if (events.length) menu.addSeparator();
     for (const event of events) {
-      menu.addItem(item => item.setTitle(editMenuTitle(event, this.settings.timeZone)).setIcon('pencil').onClick(() => this.editEvent(event)));
+      menu.addItem(item => item.setTitle(editMenuTitle(event, this.settings.timeZone)).setIcon('pencil').onClick(() => this.showEventDetails(event)));
     }
     menu.showAtMouseEvent(e);
-  }
-  private editEvent(event: CalendarEvent): void {
-    new EventModal(this.app, this.settings, async value => {
-      if (value.title !== event.title) { new Notice('Edit the Event Note title in Obsidian.'); return; }
-      await this.plugin.reschedule(event, value.interval);
-    }, event, undefined, { path: this.plugin.store.state.noteLinks[event.id]?.eventPath, change: () => void this.changeEventNote(event) }).open();
   }
   private async changeEventNote(event: CalendarEvent): Promise<void> {
     const current = this.plugin.store.state.noteLinks[event.id]?.eventPath;

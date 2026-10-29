@@ -31,3 +31,13 @@ export function resizeSidebarWithKeyboard(
     default: return undefined;
   }
 }
+
+export type CalendarPanel = 'sidebar' | 'main';
+
+/** Hiding one panel shows the other, so the view never ends up empty. */
+export function togglePanel(
+  state: { sidebarCollapsed: boolean; mainCollapsed: boolean }, panel: CalendarPanel,
+): { sidebarCollapsed: boolean; mainCollapsed: boolean } {
+  if (panel === 'sidebar') return state.sidebarCollapsed ? { ...state, sidebarCollapsed: false } : { sidebarCollapsed: true, mainCollapsed: false };
+  return state.mainCollapsed ? { ...state, mainCollapsed: false } : { sidebarCollapsed: false, mainCollapsed: true };
+}

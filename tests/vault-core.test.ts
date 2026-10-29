@@ -943,3 +943,15 @@ test('detaching an Event Note drops only managed properties', () => {
   assert.equal(detachEventFrontmatter(writeEventFrontmatter('Body\n', { id: 'local|a', sourceId: 'local', uid: 'a', title: 'A', start, end, allDay: false })), 'Body\n');
   assert.deepEqual(managedEventKeys(note), ['event_id', 'start', 'end']);
 });
+
+test('a chosen leaf receives Event, Daily, and Weekly Notes instead of a new tab', async () => {
+  const { service, opened } = setup();
+  const beside: string[] = [];
+  const target = () => ({ openFile: async (file: { path: string }) => { beside.push(file.path); } }) as never;
+  const event = await service.createLocal({ title: 'Beside', start, end });
+  const eventPath = await service.openEvent(event, undefined, target);
+  const daily = await service.openDaily('2026-10-22', target);
+  const weekly = await service.openWeekly('2026-10-22', target);
+  assert.deepEqual(beside, [eventPath, daily, weekly]);
+  assert.deepEqual(opened, []);
+});
