@@ -5,7 +5,8 @@ import { resolveDailySettings, resolveWeeklySettings, resolveWeekRules } from '.
 import { pathKey, type NoteLink } from './state';
 import { CalendarStore, type PlannedWrite } from './store';
 import type { CalendarEvent, Interval, PluginSettings } from './types';
-import { adoptEventFrontmatter, assertValidFrontmatter, detachEventFrontmatter, eventBullet, hasEventBullet, managedEventKeys, newEventNote, parseEventNote, removeDuplicateEventNoteTitle, removeEventBullets, upsertEventBullet, validateEventInterval, validateInterval, writeEventFrontmatter } from './notes';
+import { adoptEventFrontmatter, assertValidFrontmatter, detachEventFrontmatter, eventBullet, hasEventBullet, managedEventKeys, newEventNote, parseEventNote, removeDuplicateEventNoteTitle, removeEventBullets, restoreEventFrontmatter, upsertEventBullet, validateEventInterval, validateInterval, writeEventFrontmatter } from './notes';
+import { mergeNoteText, type EventNoteProblem, type NoteFacts } from './note-problems';
 
 export interface EventWritePlan {
   writes: PlannedWrite[];
@@ -39,13 +40,19 @@ interface Orphan { path: string; uid: string; recurrenceId?: string }
 /** Asks the user which of several matching Event Notes keeps the event; undefined when cancelled. */
 export type ChooseNote = (paths: string[]) => Promise<string | undefined>;
 
+/** What happens to a note that does not keep the event. */
+export type NoteDisposition = 'detach' | 'trash' | 'merge';
+
 export class EventNoteService {
-  public diagnostics: string[] = [];
+  /** Problems found by the last scan, each naming its notes and cause. */
+  public problems: EventNoteProblem[] = [];
   private queue: Promise<unknown> = Promise.resolve();
   private lastValid = new Map<string, CalendarEvent>();
 
   constructor(private readonly app: App, public readonly store: CalendarStore,
     private readonly getSettings: () => PluginSettings = () => store.state.settings) {}
+
+  get diagnostics(): string[] { return this.problems.map(problem => problem.message); }
 
   private serialized<T>(work: () => Promise<T>): Promise<T> {
     const next = this.queue.then(work, work);
@@ -143,7 +150,11 @@ export class EventNoteService {
     const paths = new Map<string, string>();
     const ambiguous = new Set<string>();
     const validIds = new Set<string>();
-    const diagnostics: string[] = [];
+    const problems: EventNoteProblem[] = [];
+    const report = (kind: EventNoteProblem['kind'], path: string, message: string, lastValid?: CalendarEvent) => {
+      problems.push({ kind, paths: [path], message: `${path}: ${message}`, ...lastValid ? { lastValid } : {} });
+    };
+    const duplicates = new Map<string, string[]>();
     const overrides = { ...this.store.state.overrides };
     const configured = new Set(this.getSettings().sources.map(source => source.id));
     const orphans: Orphan[] = [];
@@ -157,7 +168,7 @@ export class EventNoteService {
         // A note the user relinked away from is no longer this event's.
         const moved = remembered && this.store.state.noteLinks[remembered.id] && this.store.state.noteLinks[remembered.id].eventPath !== path;
         if (moved) this.lastValid.delete(path);
-        else if (remembered) { events.set(remembered.id, remembered); diagnostics.push(`${path}: Event Note is missing event_id; last valid event remains visible.`); }
+        else if (remembered) { events.set(remembered.id, remembered); report('missing-id', path, 'Event Note is missing event_id; last valid event remains visible.', remembered); }
         continue;
       }
       try {
@@ -169,9 +180,9 @@ export class EventNoteService {
           orphans.push({ path, uid: note.uid, recurrenceId: note.recurrenceId });
           continue;
         }
-        if (!note.id.trim()) { diagnostics.push(`${path}: The event_id is empty; the note was skipped.`); continue; }
+        if (!note.id.trim()) { report('invalid', path, 'The event_id is empty; the note was skipped.'); continue; }
         if (paths.has(note.id)) {
-          diagnostics.push(`${path}: Has the same event_id as ${paths.get(note.id)}, so both are skipped. Delete or merge one of them.`);
+          duplicates.set(note.id, [...duplicates.get(note.id) ?? [paths.get(note.id)!], path]);
           ambiguous.add(note.id); events.delete(note.id); validIds.delete(note.id);
           continue;
         }
@@ -179,15 +190,16 @@ export class EventNoteService {
         if (ambiguous.has(note.id)) continue;
         if (note.id.startsWith('local|')) {
           const uid = note.id.slice(6);
-          if (!uid || note.source || note.uid) { diagnostics.push(`Invalid local event_id in ${path}.`); continue; }
+          if (!uid || note.source || note.uid) { report('invalid', path, 'The event_id starts with local| but the note also has calendar properties, or nothing follows local|.'); continue; }
           events.set(note.id, { id: note.id, sourceId: 'local', uid, title: note.title,
             start: note.start, end: note.end, allDay: note.allDay });
         } else {
-          if (!note.source || !note.uid) { diagnostics.push(`Imported Event Note lacks source identity in ${path}.`); continue; }
+          if (!note.source || !note.uid) { report('invalid', path, 'This imported Event Note is missing its source or ical_uid property.'); continue; }
           const accepted = this.store.state.sourceCaches[note.source]?.accepted[note.id]?.event;
           if (!accepted || accepted.uid !== note.uid || accepted.recurrenceId !== note.recurrenceId) {
             const name = this.getSettings().sources.find(source => source.id === note.source)?.name ?? note.source;
-            diagnostics.push(`${path}: Calendar "${name}" does not list this event. It may have been deleted from the calendar, or the note's event_id, ical_uid or recurrence_id was edited.`);
+            problems.push({ kind: 'unlisted', paths: [path], sourceId: note.source,
+              message: `${path}: Calendar "${name}" does not list this event. It may have been deleted from the calendar, or the note's event_id, ical_uid or recurrence_id was edited.` });
             continue;
           }
           const difference = !sameEffectiveInterval(note, accepted);
@@ -200,19 +212,24 @@ export class EventNoteService {
         const valid = events.get(note.id);
         if (valid) { this.lastValid.set(path, valid); validIds.add(note.id); }
       } catch (error) {
-        diagnostics.push(`${path}: ${error instanceof Error ? error.message : 'Invalid Event Note.'}`);
         const remembered = this.lastValid.get(path);
+        report('invalid', path, error instanceof Error ? error.message : 'Invalid Event Note.', remembered);
         if (remembered && !ambiguous.has(remembered.id)) events.set(remembered.id, remembered);
       }
     }
     for (const id of ambiguous) events.delete(id);
-    await this.reconnectOrphans(orphans, configured, diagnostics);
-    this.diagnostics = diagnostics;
+    for (const group of duplicates.values()) {
+      problems.push({ kind: 'duplicate', paths: group, message: group.length === 2
+        ? `${group[1]}: Has the same event_id as ${group[0]}, so both are skipped. Delete or merge one of them.`
+        : `${group.join(', ')}: These ${group.length} notes have the same event_id, so all are skipped. Keep one and delete or merge the others.` });
+    }
+    await this.reconnectOrphans(orphans, configured, problems);
+    this.problems = problems;
     for (const [id, currentPath] of paths) {
       const linked = this.store.state.noteLinks[id];
       if (linked && linked.eventPath !== currentPath && validIds.has(id)) {
         try { await this.handleRename({ path: currentPath, extension: 'md' } as TFile, linked.eventPath); }
-        catch (error) { diagnostics.push(`${currentPath}: ${error instanceof Error ? error.message : 'Could not relink renamed Event Note.'}`); }
+        catch (error) { report('error', currentPath, error instanceof Error ? error.message : 'Could not relink renamed Event Note.'); }
       }
     }
     if (JSON.stringify(overrides) !== JSON.stringify(this.store.state.overrides)) {
@@ -240,7 +257,7 @@ export class EventNoteService {
             await this.store.commit(plan.writes, state => { state.noteLinks[event.id] = plan.link; });
           });
         } catch (error) {
-          diagnostics.push(`${link.dailyPath}: ${error instanceof Error ? error.message : 'Could not update linked Daily Note.'}`);
+          report('error', link.dailyPath, error instanceof Error ? error.message : 'Could not update linked Daily Note.');
         }
       }
     }
@@ -259,7 +276,7 @@ export class EventNoteService {
    * A removed subscription's notes are reconnected when exactly one current
    * calendar lists the same iCal event; the next scan then reads them as valid.
    */
-  private async reconnectOrphans(orphans: Orphan[], configured: Set<string>, diagnostics: string[]): Promise<void> {
+  private async reconnectOrphans(orphans: Orphan[], configured: Set<string>, problems: EventNoteProblem[]): Promise<void> {
     const groups = new Map<string, Orphan[]>();
     for (const orphan of orphans) {
       const key = JSON.stringify([orphan.uid, orphan.recurrenceId ?? null]);
@@ -273,7 +290,10 @@ export class EventNoteService {
         .filter(event => event.uid === uid && event.recurrenceId === recurrenceId);
       if (matches.length !== 1) {
         const reason = matches.length ? 'more than one current calendar lists this event' : 'no current calendar lists this event';
-        for (const { path } of group) diagnostics.push(`${path}: ${removed}, and ${reason}. Delete the note if you no longer need it.`);
+        for (const { path } of group) {
+          problems.push({ kind: 'orphan', paths: [path], message: `${path}: ${removed}, and ${reason}. Delete the note if you no longer need it.`,
+            ...matches.length ? { candidates: matches } : {} });
+        }
         continue;
       }
       try {
@@ -282,16 +302,149 @@ export class EventNoteService {
           await this.serialized(() => this.adoptOrphanNote(matches[0]));
           owner = await this.findEventPath(matches[0].id);
         }
-        for (const { path } of group) {
-          if (path !== owner) diagnostics.push(`${path}: ${removed}; ${owner} now holds this event. Delete this copy or merge it into that note.`);
+        const copies = group.map(item => item.path).filter(path => path !== owner);
+        if (owner && copies.length) {
+          problems.push({ kind: 'duplicate', paths: [owner, ...copies], holder: owner, message: copies.length === 1
+            ? `${copies[0]}: ${removed}; ${owner} now holds this event. Delete this copy or merge it into that note.`
+            : `${copies.join(', ')}: ${removed}; ${owner} now holds this event. Delete these copies or merge them into that note.` });
         }
       } catch (error) {
-        diagnostics.push(error instanceof Error ? error.message : `${group.map(item => item.path).join(', ')}: ${removed}.`);
+        problems.push({ kind: 'error', paths: group.map(item => item.path),
+          message: error instanceof Error ? error.message : `${group.map(item => item.path).join(', ')}: ${removed}.` });
       }
     }
   }
 
   async indexLocal(): Promise<CalendarEvent[]> { return (await this.scanEvents()).filter(event => event.sourceId === 'local'); }
+
+  /** What a reviewer needs to tell the notes of one problem apart. */
+  async inspectNotes(paths: string[]): Promise<NoteFacts[]> {
+    const contents = new Map<string, string | null>();
+    for (const path of paths) contents.set(path, await this.store.io.read(path));
+    const ids = new Set<string>();
+    for (const [path, content] of contents) {
+      try { const id = content === null ? undefined : parseEventNote(content, path)?.id; if (id) ids.add(id); }
+      catch { /* an unreadable note has no event to look up */ }
+    }
+    const keys = new Set(paths.map(pathKey));
+    const links = Object.entries(this.store.state.noteLinks).filter(([id, link]) => ids.has(id) || keys.has(pathKey(link.eventPath)));
+    const dailies: string[] = [];
+    for (const dailyPath of new Set(links.map(([, link]) => link.dailyPath))) {
+      const daily = await this.store.io.read(dailyPath);
+      if (daily !== null) dailies.push(daily);
+    }
+    return paths.map(path => {
+      const file = this.app.vault.getAbstractFileByPath(path) as TFile | null;
+      return { path, content: contents.get(path) ?? null, mtime: file?.stat?.mtime,
+        linked: links.some(([, link]) => pathKey(link.eventPath) === pathKey(path)),
+        listed: dailies.some(daily => hasEventBullet(daily, [path])) };
+    });
+  }
+
+  /** Current content, refused when it differs from what the user reviewed. */
+  private async reviewed(path: string, seen?: Record<string, string | null>): Promise<string> {
+    const content = await this.store.io.read(path);
+    if (content === null) throw new Error(`${path} no longer exists. Review the problems again.`);
+    if (seen && path in seen && seen[path] !== content) throw new Error(`${path} changed after you reviewed it. Review it again.`);
+    return content;
+  }
+
+  /** Turns a note back into an ordinary one; its claim as an Event Note is released in the same commit. */
+  private detachWrite(path: string, before: string): PlannedWrite {
+    const claim = this.store.state.pathTypes[pathKey(path)];
+    return { path, before, after: detachEventFrontmatter(before), type: claim?.type ?? 'event', ownerId: claim?.type === 'event' ? claim.ownerId : undefined };
+  }
+
+  private releaseClaims(state: CalendarStore['state'], paths: string[]): void {
+    for (const path of paths) if (state.pathTypes[pathKey(path)]?.type === 'event') delete state.pathTypes[pathKey(path)];
+  }
+
+  private async trash(paths: string[]): Promise<void> {
+    for (const path of paths) {
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (file) await this.app.fileManager.trashFile(file);
+    }
+  }
+
+  /**
+   * Resolve notes that claim one event: `keep` holds it; every other note
+   * loses its event properties, and is then left as an ordinary note, moved to
+   * trash, or first has its own text appended to `keep`. Notes are written only
+   * if they still read as `seen`, the version the user compared.
+   */
+  async resolveDuplicate(keep: string, others: { path: string; action: NoteDisposition }[], seen?: Record<string, string | null>): Promise<void> {
+    const trash = await this.serialized(async () => {
+      const keptBefore = await this.reviewed(keep, seen);
+      const kept = parseEventNote(keptBefore, keep);
+      if (!kept) throw new Error(`${keep} is no longer an Event Note.`);
+      const rest = others.filter(other => pathKey(other.path) !== pathKey(keep));
+      const writes: PlannedWrite[] = [];
+      let keptAfter = keptBefore;
+      for (const { path, action } of rest) {
+        const before = await this.reviewed(path, seen);
+        if (action === 'merge') keptAfter = mergeNoteText(keptAfter, before, path);
+        writes.push(this.detachWrite(path, before));
+      }
+      if (keptAfter !== keptBefore) writes.push({ path: keep, before: keptBefore, after: keptAfter, type: 'event', ownerId: kept.id });
+      const released = rest.map(other => other.path);
+      await this.store.commit(writes, state => this.releaseClaims(state, released));
+      for (const path of released) this.lastValid.delete(path);
+      // The Daily entry pointed to a note that just stopped being the Event Note.
+      const link = this.store.state.noteLinks[kept.id];
+      let holder: string | null = null;
+      try { holder = await this.findEventPath(kept.id); }
+      catch { /* copies left for later still share the event_id */ }
+      if (link && !link.pendingRename && holder === keep && released.some(path => pathKey(path) === pathKey(link.eventPath))) {
+        const note = parseEventNote(keptAfter, keep)!;
+        const event: CalendarEvent = { id: kept.id, sourceId: note.source ?? 'local', uid: note.uid ?? kept.id.slice(6),
+          recurrenceId: note.recurrenceId, title: note.title, start: note.start, end: note.end, allDay: note.allDay };
+        const plan = await this.planEventWrites(event, { addMissing: true });
+        await this.store.commit(plan.writes, state => { state.noteLinks[kept.id] = plan.link; });
+      }
+      return rest.filter(other => other.action !== 'detach').map(other => other.path);
+    });
+    await this.trash(trash);
+  }
+
+  /** Stop treating a note as an Event Note, keeping its text; optionally move it to trash. */
+  async releaseNote(path: string, action: 'detach' | 'trash', seen?: Record<string, string | null>): Promise<void> {
+    await this.serialized(async () => {
+      const before = await this.reviewed(path, seen);
+      const write = this.detachWrite(path, before);
+      const ids = Object.entries(this.store.state.noteLinks).filter(([, link]) => pathKey(link.eventPath) === pathKey(path)).map(([id]) => id);
+      await this.store.commit(write.after === before ? [] : [write], state => {
+        this.releaseClaims(state, [path]);
+        for (const id of ids) delete state.noteLinks[id];
+      });
+      this.lastValid.delete(path);
+    });
+    if (action === 'trash') await this.trash([path]);
+  }
+
+  /** Write the event properties last read from this note back into it. */
+  async restoreNote(path: string, seen?: Record<string, string | null>): Promise<void> {
+    await this.serialized(async () => {
+      const remembered = this.lastValid.get(path);
+      if (!remembered) throw new Error('The last valid version of this note is no longer known. Open the note to fix it.');
+      const before = await this.reviewed(path, seen);
+      const after = restoreEventFrontmatter(before, remembered);
+      await this.store.commit([{ path, before, after, type: 'event', ownerId: remembered.id }], () => undefined);
+    });
+  }
+
+  /** Give a removed subscription's note to the chosen current calendar's event. */
+  async reconnectNote(path: string, eventId: string, seen?: Record<string, string | null>): Promise<void> {
+    await this.serialized(async () => {
+      await this.reviewed(path, seen);
+      const configured = new Set(this.getSettings().sources.map(source => source.id));
+      const event = Object.entries(this.store.state.sourceCaches).filter(([id]) => configured.has(id))
+        .map(([, cache]) => cache.accepted[eventId]?.event).find(item => item);
+      if (!event) throw new Error('That calendar no longer lists this event. Refresh the calendars, then review again.');
+      const holder = await this.findEventPath(event.id);
+      if (holder) throw new Error(`${holder} already holds that event.`);
+      await this.adoptOrphanNote(event, undefined, path);
+    });
+  }
 
   async removeDuplicateTitle(path: string): Promise<boolean> {
     return this.serialized(async () => {
@@ -393,13 +546,13 @@ export class EventNoteService {
    * their Event Notes no longer match. Take over the note the removed calendar
    * left for the same iCal event instead of creating a duplicate beside it.
    */
-  private async adoptOrphanNote(event: CalendarEvent, choose?: ChooseNote): Promise<CalendarEvent> {
+  private async adoptOrphanNote(event: CalendarEvent, choose?: ChooseNote, only?: string): Promise<CalendarEvent> {
     if (event.sourceId === 'local' || await this.findEventPath(event.id)) return event;
     const configured = new Set(this.getSettings().sources.map(source => source.id));
     const orphans: { path: string; content: string; id: string }[] = [];
     for (const path of await this.store.io.listMarkdown()) {
       const content = await this.store.io.read(path);
-      if (content === null || !content.includes('ical_uid:')) continue;
+      if (content === null || !content.includes('ical_uid:') || (only && pathKey(path) !== pathKey(only))) continue;
       let note: ReturnType<typeof parseEventNote>;
       try { note = parseEventNote(content, path); }
       catch { continue; }

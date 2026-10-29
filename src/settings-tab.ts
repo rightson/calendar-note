@@ -5,6 +5,7 @@ import type { CalendarSource, PluginSettings } from './types';
 import { isEventClickAction, isEventPropertiesDefault, resolveDailySettings, resolveWeeklySettings } from './settings';
 import { dailyNotePath, eventNotePath, weeklyNotePath, folderPath } from './paths';
 import { patchSubscription, subscriptionStatus } from './subscription-settings';
+import { PROBLEM_LABELS, PROBLEM_ORDER } from './note-problems';
 
 const sample = { id: 'local|sample', sourceId: 'local', uid: 'sample', title: 'Sample event', start: '2026-10-23T09:00:00+08:00', end: '2026-10-23T10:00:00+08:00', allDay: false };
 type TextSettingKey = 'eventPattern' | 'dailyFolder' | 'dailyFormat' | 'dailyTemplate'
@@ -90,10 +91,17 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
       await this.save(next => { next.sources.push({ id, name: 'New calendar', url: '', color: '#5885d8', enabled: false }); }, true);
     }));
     new Setting(root).setName('Event Note diagnostics').setHeading();
-    if (!this.plugin.notes.diagnostics.length) root.createEl('p', { text: 'No invalid Event Notes found.', cls: 'setting-item-description' });
+    const problems = this.plugin.notes.problems;
+    if (!problems.length) root.createEl('p', { text: 'No invalid Event Notes found.', cls: 'setting-item-description' });
     else {
-      root.createEl('p', { text: 'Fix these files in the Vault, then refresh the calendar.', cls: 'setting-item-description' });
-      const list = root.createEl('ul', { cls: 'cn-diagnostics' });
+      const counts = PROBLEM_ORDER.map(kind => [PROBLEM_LABELS[kind], problems.filter(problem => problem.kind === kind).length] as const)
+        .filter(([, count]) => count).map(([label, count]) => `${label}: ${count}`).join(' · ');
+      new Setting(root).setName(`${problems.length} ${problems.length === 1 ? 'problem' : 'problems'} found`)
+        .setDesc(`${counts}. Compare the notes involved side by side and fix each one in place.`)
+        .addButton(button => button.setButtonText('Review and fix…').setCta().onClick(() => this.plugin.showProblems()));
+      const details = root.createEl('details', { cls: 'cn-diagnostics' });
+      details.createEl('summary', { text: 'Show as text', cls: 'setting-item-description' });
+      const list = details.createEl('ul');
       for (const diagnostic of this.plugin.notes.diagnostics) list.createEl('li', { text: diagnostic });
     }
     this.refreshSubscriptionStatus();

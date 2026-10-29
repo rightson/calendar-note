@@ -86,9 +86,27 @@ export function parseEventNote(content: string, path: string): ParsedEventNote |
 /** Replace only managed top-level properties; preserve all other YAML and body bytes. */
 export function writeEventFrontmatter(content: string, event: CalendarEvent): string {
   validateEventInterval(event);
-  const fm = splitFrontmatter(content);
-  const original = fm.has ? parseEventNote(content, 'Event Note') : null;
+  const original = splitFrontmatter(content).has ? parseEventNote(content, 'Event Note') : null;
   if (original && original.id !== event.id) throw new Error('The Event Note belongs to another event.');
+  return replaceEventFields(content, event);
+}
+
+/**
+ * Put back an event's last valid properties in a note that no longer passes
+ * validation, e.g. after its times or event_id were edited by hand.
+ */
+export function restoreEventFrontmatter(content: string, event: CalendarEvent): string {
+  validateEventInterval(event);
+  const fm = splitFrontmatter(content);
+  const doc = parseDocument(fm.lines.join('\n'), { uniqueKeys: true });
+  if (doc.errors.length) throw new Error('Fix the YAML in this note first; its properties cannot be read.');
+  const id = (doc.toJS() as Record<string, unknown> | null)?.event_id;
+  if (typeof id === 'string' && id.trim() && id !== event.id) throw new Error('The Event Note belongs to another event.');
+  return replaceEventFields(content, event);
+}
+
+function replaceEventFields(content: string, event: CalendarEvent): string {
+  const fm = splitFrontmatter(content);
   let lines = fm.lines;
   const fields: Record<string, string | null> = {
     event_id: event.id,

@@ -3,6 +3,7 @@ import { CalendarNoteView, CALENDAR_VIEW_TYPE } from './calendar-view';
 import { calendarOpenModeForClick, openCalendarLeaf, type CalendarOpenMode } from './calendar-open';
 import { EventPropertiesController } from './event-properties';
 import { ChangeHistoryModal } from './modals';
+import { EventNoteProblemsModal } from './problems-modal';
 import { CalendarNoteSettingTab } from './settings-tab';
 import { DEFAULT_SETTINGS } from './settings';
 import { normalizeState } from './state';
@@ -26,7 +27,7 @@ export default class CalendarNotePlugin extends Plugin {
   events: CalendarEvent[] = [];
   private range?: CalendarRange;
   private scanTimer?: number;
-  private scanRunning = false;
+  private scanning?: Promise<void>;
   private scanAgain = false;
   private disposed = false;
   private ready = false;
@@ -35,6 +36,7 @@ export default class CalendarNotePlugin extends Plugin {
   private eventProperties?: EventPropertiesController;
   private settingTab?: CalendarNoteSettingTab;
   private settingsUpdates!: SettingsUpdateQueue;
+  private problemsModal?: EventNoteProblemsModal;
 
   async onload(): Promise<void> {
     const state = normalizeState(await this.loadData(), DEFAULT_SETTINGS);
@@ -76,6 +78,7 @@ export default class CalendarNotePlugin extends Plugin {
     this.addCommand({ id: 'refresh', name: 'Refresh calendars', callback: () => void this.refresh(true) });
     this.addCommand({ id: 'change-history', name: 'Show change history', callback: () => this.showHistory() });
     this.addCommand({ id: 'retry-recovery', name: 'Retry pending recovery', callback: () => void this.retryRecovery() });
+    this.addCommand({ id: 'review-event-note-problems', name: 'Review Event Note problems', callback: () => this.showProblems() });
     this.settingTab = new CalendarNoteSettingTab(this.app, this);
     this.addSettingTab(this.settingTab);
     const changed = (file: TFile) => { if (file.extension === 'md') this.scheduleScan(); };
@@ -176,23 +179,66 @@ export default class CalendarNotePlugin extends Plugin {
     this.scanTimer = window.setTimeout(() => { this.scanTimer = undefined; void this.rescan(); }, 300);
   }
 
-  private async rescan(): Promise<void> {
-    if (!this.ready || this.disposed || this.store.recoveryConflict) return;
-    if (this.scanRunning) { this.scanAgain = true; return; }
-    this.scanRunning = true;
-    try {
-      do {
-        this.scanAgain = false;
-        const scanned = await this.notes.scanEvents();
-        this.events = scanned;
-        this.updateEventsFromCache();
-        this.refreshViews();
-        const diagnostic = this.notes.diagnostics.join('\n');
-        if (diagnostic && diagnostic !== this.lastDiagnostics) new Notice('Calendar Note found an invalid Event Note. Open its settings for the affected path.', 7000);
-        this.lastDiagnostics = diagnostic;
-      } while (this.scanAgain && !this.disposed);
-    } catch (error) { new Notice(error instanceof Error ? error.message : 'Could not scan Event Notes.'); }
-    finally { this.scanRunning = false; }
+  /** Resolves once a scan that started after this call has finished. */
+  private rescan(): Promise<void> {
+    if (!this.ready || this.disposed || this.store.recoveryConflict) return Promise.resolve();
+    if (this.scanning) { this.scanAgain = true; return this.scanning; }
+    this.scanning = (async () => {
+      try {
+        do {
+          this.scanAgain = false;
+          const scanned = await this.notes.scanEvents();
+          this.events = scanned;
+          this.updateEventsFromCache();
+          this.refreshViews();
+          const diagnostic = this.notes.diagnostics.join('\n');
+          if (diagnostic && diagnostic !== this.lastDiagnostics && !this.problemsModal) this.problemNotice();
+          this.lastDiagnostics = diagnostic;
+          this.problemsModal?.update();
+        } while (this.scanAgain && !this.disposed);
+      } catch (error) { new Notice(error instanceof Error ? error.message : 'Could not scan Event Notes.'); }
+    })().finally(() => { this.scanning = undefined; });
+    return this.scanning;
+  }
+
+  private problemNotice(): void {
+    const count = this.notes.problems.length;
+    const notice = new Notice(createFragment(fragment => {
+      fragment.appendText(`Calendar Note found ${count} Event Note ${count === 1 ? 'problem' : 'problems'}. `);
+      fragment.createEl('a', { text: 'Review and fix', href: '#' });
+    }), 10000);
+    notice.messageEl.addEventListener('click', event => { event.preventDefault(); notice.hide(); this.showProblems(); });
+  }
+
+  get problemCount(): number { return this.notes.problems.length; }
+
+  showProblems(): void {
+    if (this.problemsModal) return;
+    const changed = async (action: () => Promise<void>) => {
+      if (this.store.recoveryConflict) throw new Error('Resolve pending recovery before changing notes.');
+      try { await action(); }
+      finally { await this.rescan(); }
+    };
+    const modal = new EventNoteProblemsModal(this.app, {
+      problems: () => this.notes.problems,
+      inspect: paths => this.notes.inspectNotes(paths),
+      open: async path => {
+        const file = this.app.vault.getAbstractFileByPath(path);
+        if (!(file instanceof TFile)) throw new Error(`${path} no longer exists.`);
+        await this.app.workspace.getLeaf(true).openFile(file);
+      },
+      resolveDuplicate: (keep, others, seen) => changed(() => this.notes.resolveDuplicate(keep, others, seen)),
+      release: (path, action, seen) => changed(() => this.notes.releaseNote(path, action, seen)),
+      restore: (path, seen) => changed(() => this.notes.restoreNote(path, seen)),
+      reconnect: (path, eventId, seen) => changed(() => this.notes.reconnectNote(path, eventId, seen)),
+      refreshCalendars: () => this.refresh(true),
+      scan: () => this.rescan(),
+      calendarName: id => id === 'local' ? 'Local' : this.store.state.settings.sources.find(source => source.id === id)?.name ?? id,
+      timeZone: () => this.store.state.settings.timeZone,
+      closed: () => { this.problemsModal = undefined; },
+    });
+    this.problemsModal = modal;
+    modal.open();
   }
 
   async runAction<T>(action: () => Promise<T>): Promise<T | undefined> {

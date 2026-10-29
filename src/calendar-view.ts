@@ -43,6 +43,7 @@ export class CalendarNoteView extends ItemView {
   private periodEl?: HTMLElement;
   private viewWeekEl?: HTMLButtonElement;
   private historyEl?: HTMLButtonElement;
+  private problemsEl?: HTMLButtonElement;
   private subscriptionFailureEl?: HTMLElement;
   private listDatesEl?: HTMLElement;
   private selectedDay?: string;
@@ -140,6 +141,9 @@ export class CalendarNoteView extends ItemView {
     this.button(controls, 'New event', () => this.newEvent());
     this.button(controls, 'Refresh', () => void this.plugin.refresh(true));
     this.historyEl = this.button(controls, 'History', () => this.plugin.showHistory());
+    this.problemsEl = this.button(controls, 'Note problems', () => this.plugin.showProblems(), 'Review Event Note problems');
+    this.problemsEl.addClass('cn-problems-button');
+    this.problemsEl.hidden = true;
     this.mainCollapse = this.button(controls, '', () => void this.togglePanel('main'), 'Hide main calendar');
     this.mainCollapse.addClass('cn-main-collapse');
     this.mainCollapse.title = 'Hide main calendar';
@@ -501,6 +505,10 @@ export class CalendarNoteView extends ItemView {
   refresh(): void {
     if (!this.calendar) return;
     this.historyEl?.setText(this.plugin.reviewCount ? `History (${this.plugin.reviewCount})` : 'History');
+    if (this.problemsEl) {
+      this.problemsEl.hidden = !this.plugin.problemCount;
+      this.problemsEl.setText(`⚠ ${this.plugin.problemCount} note ${this.plugin.problemCount === 1 ? 'problem' : 'problems'}`);
+    }
     this.updateSubscriptionFailure();
     this.calendar.refetchEvents();
     this.renderMini();
