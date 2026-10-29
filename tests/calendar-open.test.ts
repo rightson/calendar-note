@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Workspace, WorkspaceLeaf } from 'obsidian';
-import { calendarOpenModeForClick, openCalendarLeaf } from '../src/calendar-open';
+import { calendarOpenModeForClick, noteSplitLeaf, openCalendarLeaf } from '../src/calendar-open';
 
 const viewType = 'calendar-note-view';
 
@@ -57,4 +57,33 @@ test('modified opening creates a vertical split to the right before revealing it
   assert.equal(created[0].mode, 'split');
   assert.equal(workspace.activeLeaf, activeNote);
   assert.deepEqual(calls, ['getLeaf:split:vertical', `setViewState:${viewType}:true`, 'revealLeaf']);
+});
+
+function splitWorkspace(leaves: object[]) {
+  const splits: Array<{ from: unknown; direction: string }> = [];
+  const workspace = {
+    iterateAllLeaves(callback: (leaf: WorkspaceLeaf) => void) { leaves.forEach(leaf => callback(leaf as WorkspaceLeaf)); },
+    createLeafBySplit(from: WorkspaceLeaf, direction: string) {
+      splits.push({ from, direction });
+      const leaf = { split: splits.length };
+      leaves.push(leaf);
+      return leaf as unknown as WorkspaceLeaf;
+    },
+  } as unknown as Workspace;
+  return { workspace, splits };
+}
+
+test('notes from the mini calendar alone open in one split beside it and reuse it while open', () => {
+  const calendar = { name: 'calendar' } as unknown as WorkspaceLeaf;
+  const leaves: object[] = [calendar];
+  const { workspace, splits } = splitWorkspace(leaves);
+  const first = noteSplitLeaf(workspace, calendar);
+  assert.deepEqual(splits, [{ from: calendar, direction: 'vertical' }]);
+  assert.equal(noteSplitLeaf(workspace, calendar, first), first);
+  assert.equal(splits.length, 1);
+  leaves.splice(leaves.indexOf(first), 1);
+  const second = noteSplitLeaf(workspace, calendar, first);
+  assert.notEqual(second, first);
+  assert.equal(splits.length, 2);
+  assert.notEqual(noteSplitLeaf(workspace, calendar, calendar), calendar);
 });

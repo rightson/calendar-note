@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DEFAULT_SETTINGS, normalizePluginSettings } from '../src/settings';
 import {
-  normalizeSidebarWidth, resizeSidebarWithKeyboard, sidebarWidthForContainer,
+  normalizeSidebarWidth, resizeSidebarWithKeyboard, sidebarWidthForContainer, togglePanel,
   SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH,
 } from '../src/sidebar-layout';
 
@@ -38,4 +38,23 @@ test('sidebar width leaves room for calendar and keyboard resizing respects boun
   assert.equal(resizeSidebarWithKeyboard(260, 'End', 700), 380);
   assert.equal(resizeSidebarWithKeyboard(260, 'Enter', 900), undefined);
   assert.equal(resizeSidebarWithKeyboard(260, 'ArrowRight', 500), undefined);
+});
+
+test('hiding one calendar panel shows the other so the view is never empty', () => {
+  const both = { sidebarCollapsed: false, mainCollapsed: false };
+  assert.deepEqual(togglePanel(both, 'main'), { sidebarCollapsed: false, mainCollapsed: true });
+  assert.deepEqual(togglePanel(both, 'sidebar'), { sidebarCollapsed: true, mainCollapsed: false });
+  assert.deepEqual(togglePanel({ sidebarCollapsed: false, mainCollapsed: true }, 'main'), both);
+  assert.deepEqual(togglePanel({ sidebarCollapsed: false, mainCollapsed: true }, 'sidebar'), { sidebarCollapsed: true, mainCollapsed: false });
+  assert.deepEqual(togglePanel({ sidebarCollapsed: true, mainCollapsed: false }, 'main'), { sidebarCollapsed: false, mainCollapsed: true });
+  assert.deepEqual(togglePanel({ sidebarCollapsed: true, mainCollapsed: false }, 'sidebar'), both);
+});
+
+test('saved main calendar collapse survives normalization but never hides both panels', () => {
+  assert.equal(normalizePluginSettings({}).mainCollapsed, false);
+  assert.equal(normalizePluginSettings({ mainCollapsed: true }).mainCollapsed, true);
+  assert.equal(normalizePluginSettings({ mainCollapsed: 'yes' }).mainCollapsed, false);
+  const both = normalizePluginSettings({ mainCollapsed: true, sidebarCollapsed: true });
+  assert.equal(both.sidebarCollapsed, true);
+  assert.equal(both.mainCollapsed, false);
 });

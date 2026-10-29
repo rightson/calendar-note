@@ -56,6 +56,7 @@ export interface PluginSettings extends WeekRules {
   customDays: number;
   sidebarWidth: number;
   sidebarCollapsed: boolean;
+  mainCollapsed: boolean;
   workdaysOnly: boolean;
 }
 

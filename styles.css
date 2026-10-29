@@ -10,6 +10,13 @@
 .cn-shell.is-sidebar-collapsed .cn-sidebar, .cn-shell.is-sidebar-collapsed .cn-sidebar-resizer { display: none; }
 .cn-shell.is-sidebar-overlay .cn-sidebar { position: absolute; z-index: 10; top: 0; left: 0; box-shadow: 4px 0 16px rgba(0,0,0,.2); }
 .cn-shell.is-sidebar-overlay .cn-sidebar-resizer { display: none; }
+.cn-main-restore { display: none; position: absolute; z-index: 11; top: 18px; right: -16px; box-sizing: border-box; width: 26px; height: 30px; min-width: 0; padding: 4px; align-items: center; justify-content: center; }
+.cn-main-restore svg, .cn-main-collapse svg { width: 16px; height: 16px; }
+.cn-main-collapse { display: inline-flex; align-items: center; justify-content: center; }
+.cn-shell.is-main-collapsed .cn-main-restore { display: inline-flex; }
+.cn-shell.is-main-collapsed .cn-content, .cn-shell.is-main-collapsed .cn-sidebar-resizer { display: none; }
+.cn-shell.is-main-collapsed .cn-sidebar { flex: 1 1 auto; }
+.cn-shell.is-main-collapsed .cn-mini { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); column-gap: 20px; align-content: start; }
 .cn-content { box-sizing: border-box; display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; flex: 1; padding: 16px 20px 18px; overflow: hidden; }
 .cn-toolbar, .cn-navigation, .cn-controls, .cn-mini-heading, .cn-history-tabs, .cn-history-actions, .cn-modal-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cn-toolbar { justify-content: space-between; margin-bottom: 12px; }
