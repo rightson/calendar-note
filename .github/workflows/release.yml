@@ -1,10 +1,16 @@
 name: Release
 
-# Run from the Actions tab (or the API) after the version bump is on main.
-# Tags the checked-out commit with manifest.json's version and publishes the
-# GitHub Release with the three plugin assets RELEASING.md requires.
+# Runs on every push to main and from the Actions tab. When manifest.json's
+# version has no GitHub Release yet, tags the commit and publishes the GitHub Release
+# with the three plugin assets RELEASING.md requires; otherwise it stops.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -31,11 +37,23 @@ jobs:
           "
           test -f "docs/releases/$version.md" || { echo "Missing docs/releases/$version.md"; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run package
+          if gh release view "$version" >/dev/null 2>&1; then
+            echo "Release $version already exists; nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+      - if: steps.version.outputs.skip != 'true'
+        run: npm ci
+      - if: steps.version.outputs.skip != 'true'
+        run: npm run typecheck
+      - if: steps.version.outputs.skip != 'true'
+        run: npm test
+      - if: steps.version.outputs.skip != 'true'
+        run: npm run package
       - name: Tag
+        if: steps.version.outputs.skip != 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -48,10 +66,11 @@ jobs:
             git push origin "refs/tags/$VERSION"
           fi
       - name: Publish release
+        if: steps.version.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          if gh release view "$VERSION" >/dev/null 2>&1; then echo "Release $VERSION already exists"; exit 0; fi
           gh release create "$VERSION" --verify-tag --title "Calendar-Note $VERSION" --notes-file "docs/releases/$VERSION.md" \
             dist/calendar-note/main.js dist/calendar-note/manifest.json dist/calendar-note/styles.css dist/calendar-note.zip
