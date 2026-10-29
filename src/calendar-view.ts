@@ -1,4 +1,4 @@
-import { ItemView, Notice, setIcon, type WorkspaceLeaf } from 'obsidian';
+import { ItemView, Menu, Notice, setIcon, type WorkspaceLeaf } from 'obsidian';
 import { Calendar, type EventClickArg, type EventDropArg, type EventInput } from '@fullcalendar/core';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
@@ -13,6 +13,7 @@ import type { CalendarEvent, Interval, PluginSettings } from './types';
 import type CalendarNotePlugin from './main';
 import { EventModal, LinkNoteModal, NoteChoiceModal } from './modals';
 import { visibleMonthCount } from './calendar-layout';
+import { editMenuTitle, eventsAt, type PointerSpan } from './calendar-menu';
 import { sidebarWidthForContainer, resizeSidebarWithKeyboard } from './sidebar-layout';
 import { subscriptionFailureMessage } from './subscription-settings';
 
@@ -214,13 +215,10 @@ export class CalendarNoteView extends ItemView {
         details.textContent = '⋯';
         details.type = 'button';
         details.setAttribute('aria-label', `Details and edit: ${event.title}`);
-        details.addEventListener('click', e => { e.stopPropagation(); new EventModal(this.app, this.settings, async value => {
-          if (value.title !== event.title) { new Notice('Edit the Event Note title in Obsidian.'); return; }
-          await this.plugin.reschedule(event, value.interval);
-        }, event, undefined, { path: this.plugin.store.state.noteLinks[event.id]?.eventPath, change: () => void this.changeEventNote(event) }).open(); });
+        details.addEventListener('click', e => { e.stopPropagation(); this.editEvent(event); });
         arg.el.appendChild(details);
         arg.el.addEventListener('contextmenu', e => {
-          e.preventDefault(); e.stopPropagation(); this.newEvent(this.pointerInterval(e.clientX, e.clientY, event));
+          e.preventDefault(); e.stopPropagation(); this.showSlotMenu(e, event);
         });
       },
       dayCellDidMount: () => this.installDateButtons(),
@@ -240,7 +238,7 @@ export class CalendarNoteView extends ItemView {
     grid.addEventListener('contextmenu', e => {
       if ((e.target as HTMLElement).closest('.fc-event')) return;
       e.preventDefault();
-      this.newEvent(this.pointerInterval(e.clientX, e.clientY));
+      this.showSlotMenu(e);
     });
     this.dateButtonObserver = new MutationObserver(() => this.installDateButtons());
     this.dateButtonObserver.observe(grid, { childList: true, subtree: true });
@@ -514,6 +512,24 @@ export class CalendarNoteView extends ItemView {
     const event = this.plugin.eventById(arg.event.id);
     if (event) void this.plugin.runAction(() => this.plugin.notes.openEvent(event, paths => new NoteChoiceModal(this.app, paths).choose()));
   }
+  /** Right-click: add an event here, or edit any event shown under the pointer. */
+  private showSlotMenu(e: MouseEvent, clicked?: CalendarEvent): void {
+    const span = this.pointerSpan(e, clicked);
+    const menu = new Menu();
+    menu.addItem(item => item.setTitle('New event').setIcon('plus').onClick(() => this.newEvent(this.newEventInterval(span))));
+    const events = eventsAt(this.plugin.events, span, this.settings.timeZone, clicked);
+    if (events.length) menu.addSeparator();
+    for (const event of events) {
+      menu.addItem(item => item.setTitle(editMenuTitle(event, this.settings.timeZone)).setIcon('pencil').onClick(() => this.editEvent(event)));
+    }
+    menu.showAtMouseEvent(e);
+  }
+  private editEvent(event: CalendarEvent): void {
+    new EventModal(this.app, this.settings, async value => {
+      if (value.title !== event.title) { new Notice('Edit the Event Note title in Obsidian.'); return; }
+      await this.plugin.reschedule(event, value.interval);
+    }, event, undefined, { path: this.plugin.store.state.noteLinks[event.id]?.eventPath, change: () => void this.changeEventNote(event) }).open();
+  }
   private async changeEventNote(event: CalendarEvent): Promise<void> {
     const current = this.plugin.store.state.noteLinks[event.id]?.eventPath;
     const path = await new LinkNoteModal(this.app, current).choose();
@@ -531,15 +547,27 @@ export class CalendarNoteView extends ItemView {
     try { await this.plugin.reschedule(event, interval); }
     catch (error) { arg.revert(); new Notice(error instanceof Error ? error.message : 'Could not reschedule event.'); }
   }
-  private pointerInterval(x: number, y: number, fallback?: CalendarEvent): Interval {
+  /** A time-grid slot when the pointer is over one, otherwise the date of the cell or event under it. */
+  private pointerSpan(e: MouseEvent, fallback?: CalendarEvent): PointerSpan {
     const grid = this.containerEl.querySelector<HTMLElement>('.cn-calendar');
-    const columns = Array.from(grid?.querySelectorAll<HTMLElement>('.fc-timegrid-col[data-date]') ?? []);
-    const column = columns.find(el => { const r = el.getBoundingClientRect(); return x >= r.left && x < r.right; });
-    const day = column?.dataset.date ?? (fallback ? dateAt(fallback.start, this.settings.timeZone).format('YYYY-MM-DD') : this.selectedDay ?? this.today());
-    const slots = Array.from(grid?.querySelectorAll<HTMLElement>('.fc-timegrid-slot[data-time]') ?? []);
-    const slot = slots.find(el => { const r = el.getBoundingClientRect(); return y >= r.top && y < r.bottom; });
-    const time = slot?.dataset.time?.slice(0, 5) ?? (fallback ? dateAt(fallback.start, this.settings.timeZone).format('HH:mm') : '09:00');
-    const start = moment.tz(`${day}T${time}:00`, 'YYYY-MM-DDTHH:mm:ss', true, this.settings.timeZone).toISOString();
+    const within = (el: HTMLElement, horizontal: boolean) => {
+      const r = el.getBoundingClientRect();
+      return horizontal ? e.clientX >= r.left && e.clientX < r.right : e.clientY >= r.top && e.clientY < r.bottom;
+    };
+    const column = Array.from(grid?.querySelectorAll<HTMLElement>('.fc-timegrid-col[data-date]') ?? []).find(el => within(el, true));
+    const slot = Array.from(grid?.querySelectorAll<HTMLElement>('.fc-timegrid-slot[data-time]') ?? []).find(el => within(el, false));
+    if (column?.dataset.date && slot?.dataset.time) {
+      const start = moment.tz(`${column.dataset.date}T${slot.dataset.time.slice(0, 5)}:00`, 'YYYY-MM-DDTHH:mm:ss', true, this.settings.timeZone);
+      return { kind: 'slot', start: start.toISOString(), end: start.clone().add(this.settings.snapMinutes, 'minutes').toISOString() };
+    }
+    const cell = (e.target as HTMLElement | null)?.closest<HTMLElement>('[data-date]')?.dataset.date?.slice(0, 10);
+    const date = cell ?? (fallback ? (fallback.allDay ? fallback.start.slice(0, 10) : dateAt(fallback.start, this.settings.timeZone).format('YYYY-MM-DD'))
+      : this.selectedDay ?? this.today());
+    return { kind: 'day', date };
+  }
+  private newEventInterval(span: PointerSpan): Interval {
+    const start = span.kind === 'slot' ? span.start
+      : moment.tz(`${span.date}T09:00:00`, 'YYYY-MM-DDTHH:mm:ss', true, this.settings.timeZone).toISOString();
     return { start, end: dateAt(start, this.settings.timeZone).add(this.settings.defaultDurationMinutes, 'minutes').toISOString(), allDay: false };
   }
   newEvent(initial?: Interval): void {
