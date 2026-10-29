@@ -1082,3 +1082,19 @@ test('hand-edited event properties can be put back from the last valid version',
   await service.scanEvents();
   assert.deepEqual(service.problems, []);
 });
+
+test('a removed calendar note that no calendar lists can be moved to trash', async () => {
+  const { io, service, store, old, resubscribe, trashed } = resubscribed();
+  const path = await service.openEvent(old);
+  delete store.state.sourceCaches.old;
+  resubscribe();
+  await service.scanEvents();
+  assert.deepEqual(service.problems.map(problem => [problem.kind, problem.paths, problem.candidates]), [['orphan', [path], undefined]]);
+  const [facts] = await service.inspectNotes([path]);
+  await service.releaseNote(path, 'trash', { [path]: facts.content });
+  assert.deepEqual(trashed, [path]);
+  assert.equal(io.files.has(path), false);
+  assert.equal(store.state.noteLinks[old.id], undefined);
+  await service.scanEvents();
+  assert.deepEqual(service.problems, []);
+});
