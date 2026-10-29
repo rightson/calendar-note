@@ -10,6 +10,15 @@ function fieldDate(value: string, allDay: boolean, zone: string): string {
   return dateAt(value, zone).format(allDay ? 'YYYY-MM-DD' : 'YYYY-MM-DDTHH:mm');
 }
 
+export interface EventNoteControls {
+  path?: string;
+  change: () => void;
+  /** Name of the calendar the event came from, shown with its original details. */
+  calendar?: string;
+  openBeside?: () => void;
+  openTab?: () => void;
+}
+
 export class EventModal extends Modal {
   private titleValue: string;
   private startValue: string;
@@ -19,7 +28,7 @@ export class EventModal extends Modal {
 
   constructor(app: Modal['app'], private settings: PluginSettings,
     private submit: (value: { title: string; interval: Interval }) => Promise<void>, private event?: CalendarEvent,
-    initial?: Interval, private note?: { path?: string; change: () => void }) {
+    initial?: Interval, private note?: EventNoteControls) {
     super(app);
     this.titleValue = event?.title ?? '';
     this.allDay = event?.allDay ?? initial?.allDay ?? false;
@@ -40,6 +49,7 @@ export class EventModal extends Modal {
     titleInput.disabled = !!this.event;
     titleInput.addEventListener('input', () => { this.titleValue = titleInput.value; });
     if (this.event) titleField.createEl('small', { text: 'Edit the title in the Event Note.', cls: 'cn-muted' });
+    if (this.event) this.renderOriginal(root, this.event);
     let startInput: HTMLInputElement;
     let endInput: HTMLInputElement;
     const makeInput = (label: string, value: string, onChange: (value: string) => void) => {
@@ -71,6 +81,12 @@ export class EventModal extends Modal {
       const change = this.note.change;
       new Setting(root).setName('Event Note').setDesc(this.note.path ?? 'Not created yet')
         .addButton(button => button.setButtonText('Change…').onClick(() => { this.close(); change(); }));
+      const { openBeside, openTab } = this.note;
+      if (openBeside || openTab) {
+        const open = new Setting(root).setName('Open Event Note');
+        if (openBeside) open.addButton(button => button.setButtonText('Beside calendar').onClick(() => { this.close(); openBeside(); }));
+        if (openTab) open.addButton(button => button.setButtonText('New tab').onClick(() => { this.close(); openTab(); }));
+      }
     }
     this.errorEl = root.createDiv({ cls: 'cn-validation', attr: { role: 'alert' } });
     const actions = root.createDiv({ cls: 'cn-modal-actions' });
@@ -90,6 +106,20 @@ export class EventModal extends Modal {
       }
     })(); });
     if (!this.event) titleInput.focus();
+  }
+
+  /** The event as its calendar describes it, which the Event Note may have diverged from. */
+  private renderOriginal(root: HTMLElement, event: CalendarEvent): void {
+    const rows: [string, string][] = [];
+    if (this.note?.calendar) rows.push(['Calendar', this.note.calendar]);
+    if (event.location?.trim()) rows.push(['Location', event.location.trim()]);
+    if (event.description?.trim()) rows.push(['Description', event.description.trim()]);
+    if (!rows.length) return;
+    const list = root.createEl('dl', { cls: 'cn-event-original' });
+    for (const [label, value] of rows) {
+      list.createEl('dt', { text: label });
+      list.createEl('dd', { text: value });
+    }
   }
 }
 
