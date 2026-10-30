@@ -1,7 +1,7 @@
 import { Modal, type App } from 'obsidian';
 import { dateAt } from './date';
 import type { NoteDisposition } from './events';
-import { PROBLEM_LABELS, PROBLEM_ORDER, describeProblem, lineDiff, problemKey, recommendKeep, sortProblems, summarizeNote,
+import { PROBLEM_LABELS, PROBLEM_ORDER, calendarVisibility, describeProblem, lineDiff, problemKey, recommendKeep, sortProblems, summarizeNote,
   uniqueLines, uniqueProperties, userContent, type EventNoteProblem, type NoteFacts, type ProblemKind } from './note-problems';
 
 type Seen = Record<string, string | null>;
@@ -135,9 +135,61 @@ export class EventNoteProblemsModal extends Modal {
     heading.createSpan({ cls: 'cn-problem-tag', text: PROBLEM_LABELS[problem.kind] });
     heading.createEl('strong', { text: title });
     card.createEl('p', { cls: 'cn-problem-explanation', text: explanation });
+    this.renderImpact(card, problem, notes);
     if (problem.kind === 'duplicate') this.renderDuplicate(card, problem, notes);
     else this.renderSingle(card, problem, notes[0]);
     card.createDiv({ cls: 'cn-problem-error cn-validation', attr: { role: 'alert' } });
+  }
+
+  /** Which event this is, whether the calendar shows it, and which notes link to the notes involved. */
+  private renderImpact(card: HTMLElement, problem: EventNoteProblem, notes: NoteFacts[]): void {
+    const box = card.createDiv({ cls: 'cn-problem-impact' });
+    const row = (label: string) => {
+      const element = box.createDiv({ cls: 'cn-problem-impact-row' });
+      element.createSpan({ cls: 'cn-problem-impact-label', text: label });
+      return element.createDiv({ cls: 'cn-problem-impact-value' });
+    };
+    const main = problem.kind === 'duplicate' ? notes.find(note => note.path === this.keepFor(problem, notes)) : notes[0];
+    const event = main?.event ?? notes.find(note => note.event)?.event;
+    const eventRow = row('Event');
+    if (event) {
+      eventRow.createEl('strong', { text: event.title });
+      const when = this.when(event.start, event.end, event.allDay);
+      if (when) eventRow.appendText(` · ${when}`);
+      eventRow.appendText(` · ${event.sourceId ? `Calendar “${this.actions.calendarName(event.sourceId)}”` : 'Local event'}`);
+    } else {
+      eventRow.setText(problem.kind === 'error' ? 'See the reason below.' : 'The note has no readable event properties.');
+    }
+    row('Calendar').setText(calendarVisibility(problem));
+    const references = notes.flatMap(note => note.references.map(reference => ({ ...reference, target: note.path })))
+      .filter((reference, index, all) => all.findIndex(other => other.path === reference.path && other.target === reference.target && other.line === reference.line) === index);
+    const linked = row('Linked from');
+    if (!references.length) {
+      linked.setText('No other note links to this note.');
+      return;
+    }
+    const list = linked.createEl('ul', { cls: 'cn-problem-references' });
+    for (const reference of references) {
+      const item = list.createEl('li');
+      const link = item.createEl('a', { text: reference.path, href: '#', attr: { title: 'Open this note in a new tab' } });
+      link.addEventListener('click', click => { click.preventDefault(); void this.openNote(reference.path); });
+      item.appendText(reference.kind === 'daily' ? ' — Daily Note entry ' : ' — links to it');
+      if (reference.line) item.createEl('code', { text: reference.line });
+      if (notes.length > 1) item.appendText(` → ${reference.target}`);
+    }
+    if (problem.kind !== 'duplicate') {
+      box.createDiv({ cls: 'cn-muted', text: `If you move the note to trash, ${references.length === 1 ? 'this link points' : 'these links point'} to a missing note. If you keep it as an ordinary note, ${references.length === 1 ? 'it keeps' : 'they keep'} working.` });
+    }
+  }
+
+  private when(start?: string, end?: string, allDay = false): string {
+    const zone = this.actions.timeZone();
+    const from = start ? dateAt(start, zone) : undefined;
+    if (!from?.isValid()) return '';
+    if (allDay) return `${from.format('ddd YYYY-MM-DD')} (all day)`;
+    const to = end ? dateAt(end, zone) : undefined;
+    if (!to?.isValid()) return from.format('ddd YYYY-MM-DD HH:mm');
+    return `${from.format('ddd YYYY-MM-DD HH:mm')}–${to.format(to.isSame(from, 'day') ? 'HH:mm' : 'YYYY-MM-DD HH:mm')}`;
   }
 
   /** Editing happens in the note itself; the next scan updates this list. */
@@ -202,10 +254,15 @@ export class EventNoteProblemsModal extends Modal {
       const properties = note.content !== null && kept.content !== null ? uniqueProperties(kept.content, note.content) : [];
       const losses = [lines ? `${lines} highlighted ${lines === 1 ? 'line' : 'lines'}` : '', properties.length ? `the ${properties.join(', ')} ${properties.length === 1 ? 'property' : 'properties'}` : '']
         .filter(Boolean).join(' and ');
+      // The tracked Daily entry is moved to the kept note; any other link is left pointing at this one.
+      const repointed = !problem.holder && note.linked && !kept.linked;
+      const stale = note.references.filter(reference => !(repointed && reference.kind === 'daily')).length;
+      const broken = item.action !== 'detach' && stale ? `; ${stale} ${stale === 1 ? 'note that links' : 'notes that link'} to it would point to a missing note` : '';
       const text = item.action === 'detach' ? `${item.path} stays in the Vault as an ordinary note; only its event properties are removed.`
         : item.action === 'merge' ? `${item.path}: its text is added to the kept note, then it is moved to trash${properties.length ? ` (its ${properties.join(', ')} ${properties.length === 1 ? 'property is' : 'properties are'} not copied)` : ''}.`
           : `${item.path} is moved to trash${losses ? ` — ${losses} would be lost from the kept note` : ''}.`;
-      outcome.createEl('li', { text, cls: (item.action === 'trash' && losses) || (item.action === 'merge' && properties.length) ? 'cn-problem-warning' : '' });
+      outcome.createEl('li', { text: broken ? `${text.slice(0, -1)}${broken}.` : text,
+        cls: (item.action === 'trash' && losses) || (item.action === 'merge' && properties.length) || broken ? 'cn-problem-warning' : '' });
     }
     if (!problem.holder && !kept.linked && others.some(note => note.linked)) {
       outcome.createEl('li', { text: `The event’s Daily Note entry is changed to link to ${keep}.` });
