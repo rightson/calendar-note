@@ -160,9 +160,58 @@ export function uniqueProperties(kept: string, other: string): string[] {
   return summarizeNote(detachEventFrontmatter(other)).properties.filter(([key, value]) => values.get(key) !== value).map(([key]) => key);
 }
 
+/** The event a note describes, read leniently so even an invalid note can say what it is about. */
+export interface NoteEvent {
+  title: string;
+  start?: string;
+  end?: string;
+  allDay: boolean;
+  /** Calendar the note came from; absent for a local event. */
+  sourceId?: string;
+}
+
+/** Another note that points to a problem note. */
+export interface NoteReference {
+  path: string;
+  /** A Daily Note's generated event entry, or any other link. */
+  kind: 'daily' | 'link';
+  /** The Daily Note entry's text. */
+  line?: string;
+}
+
+export function noteEvent(content: string, path: string): NoteEvent {
+  const summary = summarizeNote(content);
+  const values = new Map(summary.properties.map(([key, value]) => [key, value.replace(/^["']|["']$/g, '')]));
+  const heading = /^#\s+(.+?)\s*$/m.exec(summary.body);
+  const id = values.get('event_id');
+  const source = values.get('source') || (id && !id.startsWith('local|') ? id.split('|')[0] : undefined);
+  return { title: heading?.[1] ?? path.split('/').pop()!.replace(/\.md$/i, ''), start: values.get('start') || undefined,
+    end: values.get('end') || undefined, allDay: values.get('all_day') === 'true', sourceId: source || undefined };
+}
+
+/** Whether, and how, the event currently appears on the calendar. */
+export function calendarVisibility(problem: EventNoteProblem): string {
+  switch (problem.kind) {
+    case 'duplicate': return problem.holder
+      ? 'Shown on the calendar from the note that holds it. The copies are not used.'
+      : 'Not shown on the calendar until one note is kept.';
+    case 'unlisted': return 'Not shown on the calendar: its calendar no longer lists it.';
+    case 'orphan': return 'Not shown on the calendar: its calendar subscription was removed.';
+    case 'invalid': return problem.lastValid
+      ? 'Shown on the calendar from the last valid version of the note, until the plugin reloads.'
+      : 'Not shown from this note. An imported event still appears with its calendar’s times.';
+    case 'missing-id': return 'Shown on the calendar from the last valid version of the note, until the plugin reloads.';
+    case 'error': return 'Shown on the calendar; only the linked note could not be updated.';
+  }
+}
+
 export interface NoteFacts {
   path: string;
   content: string | null;
+  /** The event the note describes, when it has any event properties. */
+  event?: NoteEvent;
+  /** Daily Note entries and other notes that link to this note. */
+  references: NoteReference[];
   /** Last modification time, when the Vault reports it. */
   mtime?: number;
   /** Calendar-Note's link for the event points to this note. */

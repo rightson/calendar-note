@@ -251,6 +251,11 @@ function eventBulletLines(content: string, notePaths: string[]): Line[] {
   });
 }
 
+/** The generated entries in a Daily Note that link to any of these Event Note paths. */
+export function eventBulletText(content: string, notePaths: string[]): string[] {
+  return eventBulletLines(content, notePaths).map(line => line.text);
+}
+
 export function hasEventBullet(content: string, notePaths: string[]): boolean {
   return eventBulletLines(content, notePaths).length > 0;
 }

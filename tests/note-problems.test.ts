@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { describeProblem, lineDiff, mergeNoteText, problemKey, recommendKeep, sortProblems, summarizeNote, uniqueLines, userContent, type NoteFacts } from '../src/note-problems';
+import { calendarVisibility, describeProblem, noteEvent, lineDiff, mergeNoteText, problemKey, recommendKeep, sortProblems, summarizeNote, uniqueLines, userContent, type NoteFacts } from '../src/note-problems';
 
 const note = '---\nevent_id: "local|a"\nstart: "2026-10-22T10:00:00+08:00"\nend: "2026-10-22T11:00:00+08:00"\ntags: [x]\n---\n# Plan\n\nAgenda\n';
 
@@ -19,7 +19,7 @@ test('lines unique to a copy ignore event properties and blank lines', () => {
 });
 
 test('the recommended note is the linked one, then the listed one, then the one with most text', () => {
-  const facts = (path: string, content: string, extra: Partial<NoteFacts> = {}): NoteFacts => ({ path, content, linked: false, listed: false, ...extra });
+  const facts = (path: string, content: string, extra: Partial<NoteFacts> = {}): NoteFacts => ({ path, content, linked: false, listed: false, references: [], ...extra });
   assert.equal(recommendKeep([facts('a.md', 'long text'), facts('b.md', 'x', { linked: true })]).path, 'b.md');
   assert.equal(recommendKeep([facts('a.md', 'long text'), facts('b.md', 'x', { listed: true })]).path, 'b.md');
   assert.equal(recommendKeep([facts('a.md', 'x'), facts('b.md', 'long text')]).path, 'b.md');
@@ -52,4 +52,11 @@ test('problems are ordered by kind and described in plain words', () => {
   assert.equal(problemKey(problems[0]), 'duplicate:a.md\nc.md');
   assert.equal(describeProblem(problems[0], id => id).title, '2 notes claim the same event');
   assert.equal(describeProblem({ kind: 'unlisted', paths: ['a.md'], message: '', sourceId: 'work' }, () => 'Work').title, 'Not in calendar “Work”');
+});
+
+test('an invalid note still says which event it is about', () => {
+  assert.deepEqual(noteEvent('---\nevent_id: "work|uid"\nstart: "2026-10-24T10:00:00+08:00"\nend: "soon"\n---\n# Retro\n', 'Notes/x.md'),
+    { title: 'Retro', start: '2026-10-24T10:00:00+08:00', end: 'soon', allDay: false, sourceId: 'work' });
+  assert.deepEqual(noteEvent('---\nevent_id: "local|a"\ntags: [\n---\n', 'Notes/Plan.md'), { title: 'Plan', start: undefined, end: undefined, allDay: false, sourceId: undefined });
+  assert.match(calendarVisibility({ kind: 'orphan', paths: ['a.md'], message: '' }), /Not shown/);
 });

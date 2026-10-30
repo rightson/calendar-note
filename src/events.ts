@@ -5,8 +5,8 @@ import { resolveDailySettings, resolveWeeklySettings, resolveWeekRules } from '.
 import { pathKey, type NoteLink } from './state';
 import { CalendarStore, type PlannedWrite } from './store';
 import type { CalendarEvent, Interval, PluginSettings } from './types';
-import { adoptEventFrontmatter, assertValidFrontmatter, detachEventFrontmatter, eventBullet, hasEventBullet, managedEventKeys, newEventNote, parseEventNote, removeDuplicateEventNoteTitle, removeEventBullets, restoreEventFrontmatter, upsertEventBullet, validateEventInterval, validateInterval, writeEventFrontmatter } from './notes';
-import { mergeNoteText, type EventNoteProblem, type NoteFacts } from './note-problems';
+import { adoptEventFrontmatter, assertValidFrontmatter, detachEventFrontmatter, eventBullet, eventBulletText, hasEventBullet, managedEventKeys, newEventNote, parseEventNote, removeDuplicateEventNoteTitle, removeEventBullets, restoreEventFrontmatter, upsertEventBullet, validateEventInterval, validateInterval, writeEventFrontmatter } from './notes';
+import { mergeNoteText, noteEvent, type EventNoteProblem, type NoteFacts, type NoteReference } from './note-problems';
 
 export interface EventWritePlan {
   writes: PlannedWrite[];
@@ -331,16 +331,35 @@ export class EventNoteService {
     }
     const keys = new Set(paths.map(pathKey));
     const links = Object.entries(this.store.state.noteLinks).filter(([id, link]) => ids.has(id) || keys.has(pathKey(link.eventPath)));
-    const dailies: string[] = [];
-    for (const dailyPath of new Set(links.map(([, link]) => link.dailyPath))) {
-      const daily = await this.store.io.read(dailyPath);
-      if (daily !== null) dailies.push(daily);
+    const settings = this.getSettings();
+    const events = new Map(paths.map(path => [path, contents.get(path) ? noteEvent(contents.get(path)!, path) : undefined]));
+    // The tracked Daily Note, and the one for the date the note itself gives.
+    const dailyPaths = new Set(links.map(([, link]) => link.dailyPath));
+    for (const event of events.values()) {
+      if (!event?.start) continue;
+      try { dailyPaths.add(dailyNotePath(eventCalendarDate({ start: event.start, allDay: event.allDay } as CalendarEvent, settings.timeZone), this.app, settings)); }
+      catch { /* an unreadable start has no Daily Note */ }
     }
+    const dailies = new Map<string, string>();
+    for (const dailyPath of dailyPaths) {
+      const daily = await this.store.io.read(dailyPath);
+      if (daily !== null) dailies.set(dailyPath, daily);
+    }
+    const resolved = (this.app.metadataCache as { resolvedLinks?: Record<string, Record<string, number>> } | undefined)?.resolvedLinks ?? {};
     return paths.map(path => {
       const file = this.app.vault.getAbstractFileByPath(path) as TFile | null;
-      return { path, content: contents.get(path) ?? null, mtime: file?.stat?.mtime,
+      const references: NoteReference[] = [];
+      for (const [dailyPath, daily] of dailies) {
+        for (const line of eventBulletText(daily, [path])) references.push({ path: dailyPath, kind: 'daily', line });
+      }
+      for (const [source, targets] of Object.entries(resolved)) {
+        if (targets[path] && !keys.has(pathKey(source)) && !references.some(reference => reference.path === source)) {
+          references.push({ path: source, kind: 'link' });
+        }
+      }
+      return { path, content: contents.get(path) ?? null, mtime: file?.stat?.mtime, event: events.get(path), references,
         linked: links.some(([, link]) => pathKey(link.eventPath) === pathKey(path)),
-        listed: dailies.some(daily => hasEventBullet(daily, [path])) };
+        listed: references.some(reference => reference.kind === 'daily') };
     });
   }
 

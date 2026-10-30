@@ -1128,3 +1128,25 @@ test('the dialog preview shows the note text without its frontmatter', () => {
   assert.equal(noteBody('No frontmatter\n---\nrule'), 'No frontmatter\n---\nrule');
   assert.equal(noteBody('---\nevent_id: a\n---\n'), '');
 });
+
+test('a problem note reports its event, its Daily entry and the notes that link to it', async () => {
+  const { io, service, store, old, resubscribe } = resubscribed();
+  const path = await service.openEvent(old);
+  const link = store.state.noteLinks[old.id];
+  io.files.set('Projects/Q4.md', `See [[${path.replace(/\.md$/, '')}]]\n`);
+  delete store.state.sourceCaches.old;
+  resubscribe();
+  await service.scanEvents();
+  const app = {
+    vault: { getAbstractFileByPath: () => null },
+    metadataCache: { resolvedLinks: { 'Projects/Q4.md': { [path]: 1 }, [link.dailyPath]: { [path]: 1 } } },
+  } as unknown as App;
+  const [facts] = await new EventNoteService(app, store).inspectNotes([path]);
+  assert.deepEqual(facts.event, { title: 'FW: Meeting', start, end, allDay: false, sourceId: 'old' });
+  assert.deepEqual(facts.references, [
+    { path: link.dailyPath, kind: 'daily', line: link.bullet },
+    { path: 'Projects/Q4.md', kind: 'link' },
+  ]);
+  assert.equal(facts.listed, true);
+  assert.equal(service.problems[0].kind, 'orphan');
+});
