@@ -1,22 +1,28 @@
-import { Modal, Notice, Setting, SuggestModal, normalizePath, type App } from 'obsidian';
+import { Component, MarkdownRenderer, Modal, Notice, Setting, SuggestModal, TFile, normalizePath, setIcon, type App } from 'obsidian';
 import moment from 'moment-timezone';
 import type { CalendarEvent, Interval, PluginSettings } from './types';
 import type { ChangeHistoryEntry } from './history';
 import { historyForReview } from './history';
 import { intervalFromFields } from './calendar-input';
 import { dateAt } from './date';
+import { noteBody } from './notes';
 
 function fieldDate(value: string, allDay: boolean, zone: string): string {
   return dateAt(value, zone).format(allDay ? 'YYYY-MM-DD' : 'YYYY-MM-DDTHH:mm');
 }
+
+export type NoteOpenPlace = 'left' | 'tab' | 'right';
 
 export interface EventNoteControls {
   path?: string;
   change: () => void;
   /** Name of the calendar the event came from, shown with its original details. */
   calendar?: string;
-  openBeside?: () => void;
-  openTab?: () => void;
+  /** Notes the event could be bound to; several of them show as a dropdown. */
+  candidates?: () => Promise<string[]>;
+  /** Bind the event to another note; resolves with the note now holding it, or undefined on failure. */
+  bind?: (path: string) => Promise<string | undefined>;
+  open?: (place: NoteOpenPlace) => void;
 }
 
 export class EventModal extends Modal {
@@ -25,6 +31,9 @@ export class EventModal extends Modal {
   private endValue: string;
   private allDay: boolean;
   private errorEl!: HTMLElement;
+  private previewOwner = new Component();
+  private previewChild?: Component;
+  private previewToken = 0;
 
   constructor(app: Modal['app'], private settings: PluginSettings,
     private submit: (value: { title: string; interval: Interval }) => Promise<void>, private event?: CalendarEvent,
@@ -77,17 +86,7 @@ export class EventModal extends Modal {
       startInput.value = this.startValue;
       endInput.value = this.endValue;
     }));
-    if (this.note) {
-      const change = this.note.change;
-      new Setting(root).setName('Event Note').setDesc(this.note.path ?? 'Not created yet')
-        .addButton(button => button.setButtonText('Change…').onClick(() => { this.close(); change(); }));
-      const { openBeside, openTab } = this.note;
-      if (openBeside || openTab) {
-        const open = new Setting(root).setName('Open Event Note');
-        if (openBeside) open.addButton(button => button.setButtonText('Beside calendar').onClick(() => { this.close(); openBeside(); }));
-        if (openTab) open.addButton(button => button.setButtonText('New tab').onClick(() => { this.close(); openTab(); }));
-      }
-    }
+    if (this.note) this.renderNote(root, this.note);
     this.errorEl = root.createDiv({ cls: 'cn-validation', attr: { role: 'alert' } });
     const actions = root.createDiv({ cls: 'cn-modal-actions' });
     actions.createEl('button', { text: 'Cancel' }).addEventListener('click', () => this.close());
@@ -106,6 +105,76 @@ export class EventModal extends Modal {
       }
     })(); });
     if (!this.event) titleInput.focus();
+  }
+
+  onClose(): void {
+    this.previewToken++;
+    this.previewOwner.unload();
+    this.contentEl.empty();
+  }
+
+  /** The Event Note: which note holds the event, what it says, and where to open it. */
+  private renderNote(root: HTMLElement, note: EventNoteControls): void {
+    this.previewOwner.load();
+    let path = note.path;
+    const section = root.createDiv({ cls: 'cn-event-note' });
+    const heading = new Setting(section).setName('Event Note').setDesc(path ?? 'Not created yet');
+    heading.addButton(button => button.setButtonText('Change…').setTooltip('Bind the event to any note, or a new one')
+      .onClick(() => { this.close(); note.change(); }));
+    const preview = section.createDiv({ cls: 'cn-note-preview' });
+    void this.showPreview(preview, path);
+    if (note.candidates && note.bind) {
+      const bind = note.bind;
+      void note.candidates().then(paths => {
+        if (paths.length < 2 || !heading.settingEl.isConnected) return;
+        heading.setDesc('');
+        const select = heading.descEl.createEl('select', { cls: 'dropdown cn-note-choice', attr: { 'aria-label': 'Note bound to this event' } });
+        if (!path) select.createEl('option', { text: 'Not created yet', value: '' });
+        for (const candidate of paths) select.createEl('option', { text: candidate, value: candidate });
+        select.value = path ?? '';
+        select.addEventListener('change', () => { void (async () => {
+          if (!select.value) return;
+          select.disabled = true;
+          const linked = await bind(select.value);
+          select.disabled = false;
+          if (linked) path = linked;
+          select.value = path ?? '';
+          await this.showPreview(preview, path);
+        })(); });
+      });
+    }
+    const open = note.open;
+    if (!open) return;
+    const row = section.createDiv({ cls: 'cn-open-note', attr: { role: 'group', 'aria-label': 'Open Event Note' } });
+    const button = (place: NoteOpenPlace, icon: string, text: string, tooltip: string) => {
+      const element = row.createEl('button', { cls: `cn-open-${place}${place === 'tab' ? ' mod-cta' : ''}`, attr: { 'aria-label': tooltip } });
+      const iconEl = createSpan({ cls: 'cn-open-icon' });
+      setIcon(iconEl, icon);
+      // Each side's icon sits on the side the note will open.
+      element.append(...place === 'right' ? [createSpan({ text }), iconEl] : [iconEl, createSpan({ text })]);
+      element.addEventListener('click', () => { this.close(); open(place); });
+    };
+    button('left', 'panel-left-open', 'Left', 'Open the Event Note in a pane left of the calendar');
+    button('tab', 'maximize-2', 'Open in new tab', 'Open the Event Note in a new tab beside the calendar');
+    button('right', 'panel-right-open', 'Right', 'Open the Event Note in a pane right of the calendar');
+  }
+
+  /** Render the note's text read-only; a later call replaces an earlier one still loading. */
+  private async showPreview(el: HTMLElement, path?: string): Promise<void> {
+    const token = ++this.previewToken;
+    const file = path ? this.app.vault.getAbstractFileByPath(path) : null;
+    const content = file instanceof TFile ? await this.app.vault.cachedRead(file) : undefined;
+    if (token !== this.previewToken) return;
+    if (this.previewChild) this.previewOwner.removeChild(this.previewChild);
+    el.empty();
+    const body = content === undefined ? undefined : noteBody(content);
+    el.toggleClass('is-empty', !body);
+    if (!body) {
+      el.setText(content === undefined ? 'The note is created when you open it.' : 'This note has no text yet.');
+      return;
+    }
+    this.previewChild = this.previewOwner.addChild(new Component());
+    await MarkdownRenderer.render(this.app, body, el, path!, this.previewChild);
   }
 
   /** The event as its calendar describes it, which the Event Note may have diverged from. */

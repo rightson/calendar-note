@@ -32,27 +32,43 @@ function recentLeafIn(workspace: Workspace, item: LayoutItem): WorkspaceLeaf | u
   return leaves[0];
 }
 
+export type NoteSide = 'left' | 'right';
+
 /**
- * A new tab on the far side of the calendar: in the main area when the calendar
- * sits in a sidebar, otherwise in the nearest pane beside it (the left one when
- * there is one, so a calendar on the right opens notes on the left and a
- * calendar on the left opens them on the right). Undefined when nothing is beside it.
+ * The leaf a note tab on one side of the calendar goes after: in the main area
+ * when that side faces it from a sidebar, otherwise in the nearest pane on that
+ * side. Panes stacked above or below the calendar do not count.
  */
-export function oppositeTabLeaf(workspace: Workspace, calendarLeaf: WorkspaceLeaf): WorkspaceLeaf | undefined {
+function sideAnchor(workspace: Workspace, calendarLeaf: WorkspaceLeaf, side: NoteSide): WorkspaceLeaf | undefined {
   const root = calendarLeaf.getRoot();
   if (root === workspace.leftSplit || root === workspace.rightSplit) {
-    const anchor = recentLeafIn(workspace, workspace.rootSplit as unknown as LayoutItem);
-    return anchor && newTabAfter(workspace, anchor);
+    const towardMain: NoteSide = root === workspace.rightSplit ? 'left' : 'right';
+    return side === towardMain ? recentLeafIn(workspace, workspace.rootSplit as unknown as LayoutItem) : undefined;
   }
   for (let node = calendarLeaf.parent as unknown as LayoutItem; node.parent; node = node.parent) {
     const { children, direction } = node.parent;
     if (direction !== 'vertical' || !children) continue;
-    const index = children.indexOf(node);
-    const neighbour = children[index > 0 ? index - 1 : index + 1];
+    const neighbour = children[children.indexOf(node) + (side === 'left' ? -1 : 1)];
     const anchor = neighbour && recentLeafIn(workspace, neighbour);
-    if (anchor) return newTabAfter(workspace, anchor);
+    if (anchor) return anchor;
   }
   return undefined;
+}
+
+/**
+ * A new tab on the far side of the calendar: the pane on its left when there is
+ * one, else the one on its right, or the main area for a sidebar calendar.
+ * Undefined when nothing is beside it.
+ */
+export function oppositeTabLeaf(workspace: Workspace, calendarLeaf: WorkspaceLeaf): WorkspaceLeaf | undefined {
+  const anchor = sideAnchor(workspace, calendarLeaf, 'left') ?? sideAnchor(workspace, calendarLeaf, 'right');
+  return anchor && newTabAfter(workspace, anchor);
+}
+
+/** A new tab in the pane on `side` of the calendar, splitting the calendar when nothing is there. */
+export function sideTabLeaf(workspace: Workspace, calendarLeaf: WorkspaceLeaf, side: NoteSide): WorkspaceLeaf {
+  const anchor = sideAnchor(workspace, calendarLeaf, side);
+  return anchor ? newTabAfter(workspace, anchor) : workspace.createLeafBySplit(calendarLeaf, 'vertical', side === 'left');
 }
 
 /**

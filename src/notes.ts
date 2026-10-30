@@ -289,3 +289,8 @@ export function addEventBullet(content: string, bullet: string): string {
   const before = content.slice(0, last?.end ?? section.start);
   return `${before}${before.endsWith('\n') ? '' : '\n'}${close}${bullet}\n${content.slice(before.length)}`;
 }
+
+/** Markdown below the frontmatter, which the dialog already shows as fields. */
+export function noteBody(content: string): string {
+  return content.replace(/^---\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/, '').trim();
+}

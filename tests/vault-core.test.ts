@@ -5,7 +5,7 @@ import { CalendarStore, type RecoveryJournal, type StoreIO } from '../src/store'
 import { freshState } from '../src/state';
 import { DEFAULT_SETTINGS } from '../src/settings';
 import type { App } from 'obsidian';
-import { addEventBullet, detachEventFrontmatter, managedEventKeys, newEventNote, parseEventNote, removeDuplicateEventNoteTitle, validateInterval, validateSourceInterval, writeEventFrontmatter } from '../src/notes';
+import { addEventBullet, detachEventFrontmatter, managedEventKeys, newEventNote, noteBody, parseEventNote, removeDuplicateEventNoteTitle, validateInterval, validateSourceInterval, writeEventFrontmatter } from '../src/notes';
 import { emptySourceCache } from '../src/history';
 import { sourceEventId } from '../src/ical';
 import type { CalendarEvent } from '../src/types';
@@ -1103,6 +1103,30 @@ test('a removed calendar note that no calendar lists can be moved to trash', asy
   assert.equal(store.state.noteLinks[old.id], undefined);
   await service.scanEvents();
   assert.deepEqual(service.problems, []);
+});
+
+test('notes named like the Event Note beside it are offered for binding, but not other events\' notes', async () => {
+  const { io, service, store } = setup();
+  const event = await service.createLocal({ title: 'Standup', start, end });
+  const other = await service.createLocal({ title: 'Standup sync', start, end });
+  const eventPath = store.state.noteLinks[event.id].eventPath;
+  const otherPath = store.state.noteLinks[other.id].eventPath;
+  const folder = eventPath.slice(0, eventPath.lastIndexOf('/'));
+  io.files.set(`${folder}/Standup (2).md`, 'Second copy\n');
+  io.files.set(`${folder}/Standup draft.md`, 'Draft\n');
+  io.files.set(`${folder}/Retro.md`, 'Unrelated\n');
+  io.files.set(`Elsewhere/Standup.md`, 'Another folder\n');
+  const candidates = await service.noteCandidates(event);
+  assert.deepEqual(candidates, [eventPath, `${folder}/Standup (2).md`, `${folder}/Standup draft.md`].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })));
+  assert.ok(!candidates.includes(otherPath));
+  assert.ok(!candidates.includes(store.state.noteLinks[event.id].dailyPath));
+});
+
+test('the dialog preview shows the note text without its frontmatter', () => {
+  assert.equal(noteBody('---\nevent_id: a\nstart: x\n---\n# Title\n\nBody\n'), '# Title\n\nBody');
+  assert.equal(noteBody('---\n---\nOnly body'), 'Only body');
+  assert.equal(noteBody('No frontmatter\n---\nrule'), 'No frontmatter\n---\nrule');
+  assert.equal(noteBody('---\nevent_id: a\n---\n'), '');
 });
 
 test('a problem note reports its event, its Daily entry and the notes that link to it', async () => {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Workspace, WorkspaceLeaf } from 'obsidian';
-import { calendarOpenModeForClick, noteSplitLeaf, oppositeTabLeaf, openCalendarLeaf } from '../src/calendar-open';
+import { calendarOpenModeForClick, noteSplitLeaf, oppositeTabLeaf, openCalendarLeaf, sideTabLeaf } from '../src/calendar-open';
 
 const viewType = 'calendar-note-view';
 
@@ -76,7 +76,7 @@ function layout() {
     [rootSplit, leftSplit, rightSplit].forEach(walk);
     return all;
   };
-  const splits: Array<{ from: unknown; direction: string }> = [];
+  const splits: Array<{ from: unknown; direction: string; before?: boolean }> = [];
   const workspace = {
     rootSplit, leftSplit, rightSplit,
     iterateAllLeaves(callback: (leaf: WorkspaceLeaf) => void) { leaves().forEach(item => callback(item as unknown as WorkspaceLeaf)); },
@@ -89,8 +89,8 @@ function layout() {
       parent.children!.splice(index, 0, created);
       return created as unknown as WorkspaceLeaf;
     },
-    createLeafBySplit(from: Item, direction: string) {
-      splits.push({ from, direction });
+    createLeafBySplit(from: Item, direction: string, before?: boolean) {
+      splits.push({ from, direction, ...before ? { before } : {} });
       const split = add(from.parent!.parent!, { children: [] });
       return leaf(split, `split ${splits.length}`) as unknown as WorkspaceLeaf;
     },
@@ -169,4 +169,40 @@ test('notes beside a calendar use the pane already on its far side instead of sp
   assert.equal((first as unknown as Item).parent, left);
   assert.equal(noteSplitLeaf(workspace, calendar, first), first);
   assert.equal(splits.length, 0);
+});
+
+test('Left and Right open a new tab in the pane on that side of the calendar', () => {
+  const { workspace, rootSplit, tabs, leaf, splits } = layout();
+  const left = tabs(rootSplit);
+  leaf(left, 'left note');
+  const calendar = asLeaf(leaf(tabs(rootSplit), 'calendar'));
+  const right = tabs(rootSplit);
+  leaf(right, 'right note');
+  assert.equal((sideTabLeaf(workspace, calendar, 'left') as unknown as Item).parent, left);
+  assert.equal((sideTabLeaf(workspace, calendar, 'right') as unknown as Item).parent, right);
+  assert.equal(splits.length, 0);
+});
+
+test('Left or Right with no pane on that side splits the calendar on that side', () => {
+  const { workspace, rootSplit, tabs, leaf, splits } = layout();
+  leaf(tabs(rootSplit), 'note');
+  const calendar = asLeaf(leaf(tabs(rootSplit), 'calendar'));
+  assert.notEqual((sideTabLeaf(workspace, calendar, 'left') as unknown as Item).parent, (calendar as unknown as Item).parent);
+  assert.equal(splits.length, 0);
+  sideTabLeaf(workspace, calendar, 'right');
+  assert.deepEqual(splits, [{ from: calendar, direction: 'vertical' }]);
+  const alone = layout();
+  const lone = asLeaf(alone.leaf(alone.tabs(alone.rootSplit), 'calendar'));
+  sideTabLeaf(alone.workspace, lone, 'left');
+  assert.deepEqual(alone.splits, [{ from: lone, direction: 'vertical', before: true }]);
+});
+
+test('from a right sidebar, Left opens in the main area and Right splits the sidebar', () => {
+  const { workspace, rootSplit, rightSplit, tabs, leaf, splits } = layout();
+  const main = tabs(rootSplit);
+  leaf(main, 'note');
+  const calendar = asLeaf(leaf(tabs(rightSplit), 'calendar'));
+  assert.equal((sideTabLeaf(workspace, calendar, 'left') as unknown as Item).parent, main);
+  sideTabLeaf(workspace, calendar, 'right');
+  assert.deepEqual(splits, [{ from: calendar, direction: 'vertical' }]);
 });

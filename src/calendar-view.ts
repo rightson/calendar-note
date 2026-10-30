@@ -14,7 +14,7 @@ import type CalendarNotePlugin from './main';
 import { EventModal, LinkNoteModal, NoteChoiceModal } from './modals';
 import { miniMonthColumns, visibleMonthCount } from './calendar-layout';
 import { editMenuTitle, eventsAt, type PointerSpan } from './calendar-menu';
-import { noteSplitLeaf, oppositeTabLeaf } from './calendar-open';
+import { noteSplitLeaf, oppositeTabLeaf, sideTabLeaf } from './calendar-open';
 import { sidebarWidthForContainer, resizeSidebarWithKeyboard, togglePanel, type CalendarPanel } from './sidebar-layout';
 import { subscriptionFailureMessage } from './subscription-settings';
 
@@ -566,8 +566,9 @@ export class CalendarNoteView extends ItemView {
       path: this.plugin.store.state.noteLinks[event.id]?.eventPath,
       change: () => void this.changeEventNote(event),
       calendar: this.settings.sources.find(source => source.id === event.sourceId)?.name,
-      openBeside: () => this.openEventNote(event, this.besideTarget),
-      openTab: () => this.openEventNote(event, this.tabTarget),
+      candidates: () => this.plugin.notes.noteCandidates(event),
+      bind: path => this.plugin.linkEventNote(event, path, paths => new NoteChoiceModal(this.app, paths).choose(), false),
+      open: place => this.openEventNote(event, place === 'tab' ? this.tabTarget : () => sideTabLeaf(this.app.workspace, this.leaf, place)),
     }).open();
   }
   /** Right-click: add an event here, or edit any event shown under the pointer. */
