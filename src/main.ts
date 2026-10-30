@@ -233,7 +233,14 @@ export default class CalendarNotePlugin extends Plugin {
       reconnect: (path, eventId, seen) => changed(() => this.notes.reconnectNote(path, eventId, seen)),
       refreshCalendars: () => this.refresh(true),
       scan: () => this.rescan(),
-      calendarName: id => id === 'local' ? 'Local' : this.store.state.settings.sources.find(source => source.id === id)?.name ?? id,
+      calendarName: id => {
+        if (id === 'local') return 'Local';
+        const current = this.store.state.settings.sources.find(source => source.id === id)?.name;
+        if (current) return current;
+        // A removed subscription is gone from settings; History still knows its name.
+        const removed = this.store.state.history.find(entry => entry.sourceId === id)?.sourceName;
+        return removed ? `${removed} (removed)` : 'a removed calendar';
+      },
       timeZone: () => this.store.state.settings.timeZone,
       closed: () => { this.problemsModal = undefined; },
     });
