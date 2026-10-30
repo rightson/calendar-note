@@ -266,13 +266,15 @@ export default class CalendarNotePlugin extends Plugin {
     this.scheduleScan();
   }
 
-  async linkEventNote(event: CalendarEvent, path: string, choose?: ChooseNote): Promise<void> {
-    await this.runAction(async () => {
+  /** Bind the event to the note at `path`, opening it unless `open` is false. */
+  async linkEventNote(event: CalendarEvent, path: string, choose?: ChooseNote, open = true): Promise<string | undefined> {
+    return this.runAction(async () => {
       const linked = await this.notes.linkNote(event, path, choose);
       const file = this.app.vault.getAbstractFileByPath(linked);
-      if (file instanceof TFile) await this.app.workspace.getLeaf(true).openFile(file);
+      if (open && file instanceof TFile) await this.app.workspace.getLeaf(true).openFile(file);
       new Notice(`Linked the event to ${linked}.`);
       this.scheduleScan();
+      return linked;
     });
   }
 

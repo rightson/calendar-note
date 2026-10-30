@@ -681,6 +681,32 @@ export class EventNoteService {
     });
   }
 
+  /**
+   * Notes the event could be bound to: its current Event Note and the notes
+   * beside it whose names start the same way, such as `Standup (2).md` or
+   * `Standup draft.md` next to `Standup.md`. Daily and Weekly Notes and notes
+   * held by another event are left out.
+   */
+  async noteCandidates(event: CalendarEvent): Promise<string[]> {
+    const settings = this.getSettings();
+    const sourceName = settings.sources.find(source => source.id === event.sourceId)?.name ?? (event.sourceId === 'local' ? 'Local' : event.sourceId);
+    const current = this.store.state.noteLinks[event.id]?.eventPath;
+    const stems = new Set([eventNotePath(event, sourceName, settings), ...current ? [current] : []]
+      .map(path => pathKey(path).replace(/\.md$/, '').replace(/ \(\d+\)$/, '')));
+    const linkedDaily = new Set(Object.values(this.store.state.noteLinks).map(link => pathKey(link.dailyPath)));
+    const candidates = (await this.store.io.listMarkdown()).filter(path => {
+      const key = pathKey(path);
+      if (current && key === pathKey(current)) return true;
+      const claim = this.store.state.pathTypes[key];
+      if (claim && (claim.type !== 'event' || claim.ownerId !== event.id)) return false;
+      if (linkedDaily.has(key)) return false;
+      const folder = (value: string) => value.slice(0, Math.max(value.lastIndexOf('/'), 0));
+      return [...stems].some(stem => folder(key) === folder(stem) && key.startsWith(stem));
+    });
+    if (current && !candidates.some(path => pathKey(path) === pathKey(current))) candidates.push(current);
+    return candidates.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }
+
   /** `target` picks the leaf to open in; a new tab otherwise. */
   async openDaily(date: string, target?: () => WorkspaceLeaf): Promise<string> {
     return this.serialized(async () => {
