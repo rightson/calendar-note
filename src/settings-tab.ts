@@ -2,7 +2,7 @@ import { Notice, PluginSettingTab, Setting, type App, type ToggleComponent } fro
 import moment from 'moment-timezone';
 import type CalendarNotePlugin from './main';
 import type { CalendarSource, PluginSettings } from './types';
-import { isEventClickAction, isEventPropertiesDefault, resolveDailySettings, resolveWeeklySettings } from './settings';
+import { isEventClickAction, isEventPropertiesDefault, isMainDateClickAction, isMiniDateClickAction, resolveDailySettings, resolveWeeklySettings } from './settings';
 import { dailyNotePath, eventNotePath, weeklyNotePath, folderPath } from './paths';
 import { patchSubscription, subscriptionStatus } from './subscription-settings';
 import { PROBLEM_LABELS, PROBLEM_ORDER } from './note-problems';
@@ -19,6 +19,8 @@ export function validatePluginSettings(app: App, settings: PluginSettings): { ev
   if (!Number.isInteger(settings.customDays) || settings.customDays < 2 || settings.customDays > 14) throw new Error('Custom days must be 2–14.');
   if (!isEventPropertiesDefault(settings.eventPropertiesDefault)) throw new Error('Choose a valid Event Note Properties default.');
   if (!isEventClickAction(settings.eventClickAction)) throw new Error('Choose a valid event click action.');
+  if (!isMiniDateClickAction(settings.miniDateClickAction)) throw new Error('Choose a valid mini calendar click action.');
+  if (!isMainDateClickAction(settings.mainDateClickAction)) throw new Error('Choose a valid main calendar click action.');
   folderPath(settings.dailyFolder); folderPath(settings.weeklyFolder);
   const event = eventNotePath(sample, 'Local', settings);
   const daily = dailyNotePath('2026-10-23', app, settings);
@@ -80,9 +82,22 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
     this.dropdown(root, 'Snap interval', 'snapMinutes', [['5', '5 minutes'], ['10', '10 minutes'], ['15', '15 minutes'], ['20', '20 minutes'], ['30', '30 minutes'], ['60', '60 minutes']]);
     this.number(root, 'Default event duration (minutes)', 'defaultDurationMinutes');
     this.number(root, 'Custom view days', 'customDays');
+    new Setting(root).setName('Clicking').setHeading();
+    this.dropdown(root, 'Clicking a date in the mini calendar', 'miniDateClickAction', [
+      ['navigate', 'Go to the date in the main calendar'],
+      ['split', 'Go to the date and open its Daily Note beside the calendar'],
+      ['tab', 'Go to the date and open its Daily Note in a new tab'],
+    ], 'The calendar on the left. With the main calendar hidden, going to a date opens its Daily Note beside the calendar. Week numbers always open the Weekly Note.');
+    this.dropdown(root, 'Clicking an empty slot in the main calendar', 'mainDateClickAction', [
+      ['auto', 'New event in Week and Day; Daily Note in Month and Year'],
+      ['event', 'Always create a new event'],
+      ['split', 'Open the Daily Note beside the calendar'],
+      ['tab', 'Open the Daily Note in a new tab'],
+      ['none', 'Do nothing'],
+    ], 'A time slot or date cell with no event. A new event in Month or Year is all-day. Right-click still offers New event, and date headers and day numbers still open the Daily Note.');
     this.dropdown(root, 'Clicking an event', 'eventClickAction', [
       ['dialog', 'Show event details'], ['split', 'Open Event Note beside the calendar'], ['tab', 'Open Event Note in a new tab'],
-    ], 'The event details dialog can still open the Event Note either way.');
+    ], 'In the main calendar. The event details dialog can still open the Event Note either way.');
     new Setting(root).setName('Subscriptions').setHeading();
     this.number(root, 'Refresh interval (minutes)', 'syncIntervalMinutes');
     for (const source of settings.sources) this.sourceSetting(root, source);
@@ -171,7 +186,7 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
       input.inputEl.addEventListener('keydown', e => { if (e.key === 'Enter') input.inputEl.blur(); });
     });
   }
-  private dropdown(root: HTMLElement, name: string, key: 'weekMode' | 'weekStart' | 'snapMinutes' | 'eventPropertiesDefault' | 'eventClickAction', values: [string, string][], description?: string): void {
+  private dropdown(root: HTMLElement, name: string, key: 'weekMode' | 'weekStart' | 'snapMinutes' | 'eventPropertiesDefault' | 'eventClickAction' | 'miniDateClickAction' | 'mainDateClickAction', values: [string, string][], description?: string): void {
     const setting = new Setting(root).setName(name);
     if (description) setting.setDesc(description);
     setting.addDropdown(select => {
