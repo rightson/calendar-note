@@ -7,6 +7,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "node esbuild.config.mjs",
+    "dev": "node scripts/dev.mjs",
     "test": "node --import tsx --test tests/*.test.ts",
     "package": "npm run build && node scripts/package.mjs",
     "install:test-vault": "node scripts/install.mjs"
