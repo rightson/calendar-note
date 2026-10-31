@@ -1,12 +1,15 @@
 import type { App } from 'obsidian';
-import type { EventClickAction, EventPropertiesDefault, PluginSettings, ResolvedNoteSettings, WeekRules, WeekStart } from './types';
+import type { EventClickAction, EventPropertiesDefault, MainDateClickAction, MiniDateClickAction, PluginSettings, ResolvedNoteSettings, WeekRules, WeekStart } from './types';
 import { normalizeSidebarWidth, SIDEBAR_DEFAULT_WIDTH } from './sidebar-layout';
 
 export const DEFAULT_SETTINGS: PluginSettings = {
   sources: [],
   eventPattern: '[Calendar Notes]/{title}',
+  moveEventNotes: true,
   eventPropertiesDefault: 'collapsed',
   eventClickAction: 'dialog',
+  miniDateClickAction: 'navigate',
+  mainDateClickAction: 'auto',
   dailyFolder: 'Daily Notes',
   dailyFormat: 'YYYY-MM-DD',
   dailyTemplate: '',
@@ -47,11 +50,14 @@ export function normalizePluginSettings(raw: unknown, fallback: PluginSettings =
     // Both panels hidden would leave an empty view, so the main calendar wins.
     mainCollapsed: mainCollapsed && !sidebarCollapsed,
     workdaysOnly: typeof input.workdaysOnly === 'boolean' ? input.workdaysOnly : fallback.workdaysOnly,
+    moveEventNotes: typeof input.moveEventNotes === 'boolean' ? input.moveEventNotes : fallback.moveEventNotes,
     monthsOnStartup: typeof input.monthsOnStartup === 'boolean' ? input.monthsOnStartup : fallback.monthsOnStartup,
     monthsMinimum: isMonthsMinimum(input.monthsMinimum) ? input.monthsMinimum : fallback.monthsMinimum,
     eventPropertiesDefault: isEventPropertiesDefault(input.eventPropertiesDefault)
       ? input.eventPropertiesDefault : fallback.eventPropertiesDefault,
     eventClickAction: isEventClickAction(input.eventClickAction) ? input.eventClickAction : fallback.eventClickAction,
+    miniDateClickAction: isMiniDateClickAction(input.miniDateClickAction) ? input.miniDateClickAction : fallback.miniDateClickAction,
+    mainDateClickAction: isMainDateClickAction(input.mainDateClickAction) ? input.mainDateClickAction : fallback.mainDateClickAction,
   };
 }
 
@@ -63,6 +69,14 @@ export function isMonthsMinimum(value: unknown): value is number {
 
 export function isEventClickAction(value: unknown): value is EventClickAction {
   return value === 'dialog' || value === 'split' || value === 'tab';
+}
+
+export function isMiniDateClickAction(value: unknown): value is MiniDateClickAction {
+  return value === 'navigate' || value === 'split' || value === 'tab';
+}
+
+export function isMainDateClickAction(value: unknown): value is MainDateClickAction {
+  return value === 'auto' || value === 'event' || value === 'split' || value === 'tab' || value === 'none';
 }
 
 export function isEventPropertiesDefault(value: unknown): value is EventPropertiesDefault {

@@ -12,7 +12,10 @@ test('older saved settings gain safe layout defaults without changing other valu
   assert.equal(restored.sidebarWidth, SIDEBAR_DEFAULT_WIDTH);
   assert.equal(restored.sidebarCollapsed, false);
   assert.equal(restored.workdaysOnly, false);
+  assert.equal(restored.moveEventNotes, true);
   assert.equal(DEFAULT_SETTINGS.sidebarWidth, SIDEBAR_DEFAULT_WIDTH);
+  assert.equal(normalizePluginSettings({ moveEventNotes: false }).moveEventNotes, false);
+  assert.equal(normalizePluginSettings({ moveEventNotes: 'no' }).moveEventNotes, true);
 });
 
 test('saved sidebar preferences survive normalization and bad values cannot poison layout', () => {
