@@ -5,6 +5,7 @@ import { resolveWeekRules } from './settings';
 import { dailyNotePath } from './paths';
 import { miniMonthColumns } from './calendar-layout';
 import { chooseMonthDensity, eventCountsByDay, MONTH_DENSITIES, monthSpanLabel, type MonthDensity } from './months-layout';
+import { holidayDays, showsEvent } from './holidays';
 import type { PluginSettings, WeekRules } from './types';
 import type CalendarNotePlugin from './main';
 
@@ -124,7 +125,11 @@ export class MonthsView extends ItemView {
       today: this.today(),
       currentWeek: weekInfo(this.today(), rules, zone).start,
       activePath: active?.path,
-      counts: eventCountsByDay(this.plugin.events, zone, span.from, span.to),
+      // Same events as the main calendar shows: holiday calendars set to hide their events add no dots.
+      counts: eventCountsByDay(this.plugin.events.filter(event => showsEvent(event, this.settings.sources)), zone, span.from, span.to),
+      // Holidays come from every cached event of holiday calendars, not only the main calendar's range.
+      holidays: holidayDays(this.plugin.subscriptions?.getEvents({ start: new Date(0).toISOString(), end: new Date(8640000000000000).toISOString() })
+        ?? this.plugin.events, this.settings.sources, zone),
     };
   }
 
@@ -168,6 +173,13 @@ export class MonthsView extends ItemView {
           const path = this.dailyPath(day);
           if (path && this.app.vault.getAbstractFileByPath(path) instanceof TFile) { button.addClass('has-note'); label.push('Daily Note exists'); }
           if (path && path === context.activePath) button.addClass('is-active');
+        }
+        const holiday = context.holidays.get(day);
+        if (holiday) {
+          button.addClass('is-holiday');
+          if (holiday.color) button.style.setProperty('--cn-holiday-color', holiday.color);
+          else button.addClass('is-holiday-unshaded');
+          label.push(holiday.titles.join(', '));
         }
         button.setAttribute('aria-label', label.join('. '));
         button.title = label.join(' · ');

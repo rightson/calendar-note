@@ -36,7 +36,7 @@ A compact month calendar, like a calendar widget, sits beside your notes. It is 
 - **Where it appears:** it is added to the right sidebar when Obsidian starts, unless it is already open somewhere. Drag its tab anywhere; it stays where you put it on later starts. To stack it under the file explorer in the left sidebar, one above the other, drag it there or run **Move month calendar below the file explorer** (also a button in settings). Run **Open month calendar in sidebar** to bring it back after closing it.
 - **How many months:** a taller panel shows more months, and a wide panel lays them out side by side. In a short panel the month cards get smaller, in up to three steps, until the number of months set in **Show at least** fits. Cards only shrink when that shows an extra month.
 - **Opening notes:** click a date to open its Daily Note, or a week number to open its Weekly Note, in the main area. Ctrl/Cmd-click opens it in a new tab.
-- **What it marks:** dots under a date show its events (up to three), bold dates already have a Daily Note, and the Daily Note you are viewing is highlighted. Today is outlined.
+- **What it marks:** dots under a date show its events (up to three), bold dates already have a Daily Note, and the Daily Note you are viewing is highlighted. Today is outlined, and holidays from holiday calendars are shaded as in the mini calendar (see [Holiday calendars](#holiday-calendars)).
 - **Moving through months:** use **‹** and **›**, or scroll over the months; **Today** returns to the current month.
 - Subscribed events are marked only for the dates the main calendar has loaded; local events are always marked.
 
@@ -51,6 +51,15 @@ Settings under **Month calendar**:
 ### Subscriptions
 
 Subscriptions are optional. Add an HTTPS or `webcal://` feed in settings to display read-only calendar events. Local events work without a subscription. Imported calendar data is cached for use in the calendar, and event changes can be reviewed in History. Removing the plugin or a feed does not delete Vault notes.
+
+### Holiday calendars
+
+Set a subscription's **Calendar type** to **Holidays** (for example a public-holiday feed such as Google's Taiwan holidays) to mark the days its events cover, not just list them. Each holiday calendar has its own options:
+
+- **Holiday background:** **Gray** (the default, following the light or dark theme), **Custom color** (pick it under **Holiday background color**), or **None**. The background fills the whole day in Week, Day, and Custom days views (both the all-day row and the time grid) and the day cell in Month and Year views. The mini calendar in the Calendar Note tab and the sidebar month calendar mark the same dates; hover a date to see the holiday's name.
+- **Show holiday names:** turn off to hide the holiday events themselves while keeping their dates shaded. Hidden holidays also leave List view, the right-click **Edit** menu, and the month calendar's event dots.
+
+When several holiday calendars share a date, the first one in settings sets its background. The mini calendar marks holidays from every month already loaded for that calendar, so months you have never viewed may appear unmarked until you visit them. Subscriptions without a type stay ordinary event calendars.
 
 ### Where Event Notes go
 
