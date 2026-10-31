@@ -1,5 +1,5 @@
 import type { App, TFile, WorkspaceLeaf } from 'obsidian';
-import { dateAt, weekInfo } from './date';
+import { dateAt, eventCalendarDate, weekInfo } from './date';
 import { dailyNotePath, eventNotePath, weeklyNotePath } from './paths';
 import { resolveDailySettings, resolveWeeklySettings, resolveWeekRules } from './settings';
 import { pathKey, type NoteLink } from './state';
@@ -20,12 +20,6 @@ export interface IntervalWritePlan {
   writes: PlannedWrite[];
   link?: NoteLink;
   event: CalendarEvent;
-}
-
-function eventCalendarDate(event: CalendarEvent, zone: string): string {
-  // iCalendar all-day dates are calendar dates, not instants to convert into
-  // the display zone. Their exclusive end follows the same rule.
-  return event.allDay ? event.start.slice(0, 10) : dateAt(event.start, zone).format('YYYY-MM-DD');
 }
 
 function sameEffectiveInterval(note: { start: string; end: string; allDay: boolean }, source: CalendarEvent): boolean {
@@ -84,7 +78,7 @@ export class EventNoteService {
     if (previous) return previous;
     const settings = this.getSettings();
     const sourceName = settings.sources.find(source => source.id === event.sourceId)?.name ?? (event.sourceId === 'local' ? 'Local' : event.sourceId);
-    const base = eventNotePath(event, sourceName, settings);
+    const base = eventNotePath(event, sourceName, this.app, settings);
     const known = new Set((await this.store.io.listMarkdown()).map(pathKey));
     for (let number = 1; number < 10_000; number++) {
       const candidate = number === 1 ? base : base.replace(/\.md$/i, ` (${number}).md`);
@@ -710,7 +704,7 @@ export class EventNoteService {
     const settings = this.getSettings();
     const sourceName = settings.sources.find(source => source.id === event.sourceId)?.name ?? (event.sourceId === 'local' ? 'Local' : event.sourceId);
     const current = this.store.state.noteLinks[event.id]?.eventPath;
-    const stems = new Set([eventNotePath(event, sourceName, settings), ...current ? [current] : []]
+    const stems = new Set([eventNotePath(event, sourceName, this.app, settings), ...current ? [current] : []]
       .map(path => pathKey(path).replace(/\.md$/, '').replace(/ \(\d+\)$/, '')));
     const linkedDaily = new Set(Object.values(this.store.state.noteLinks).map(link => pathKey(link.dailyPath)));
     const candidates = (await this.store.io.listMarkdown()).filter(path => {

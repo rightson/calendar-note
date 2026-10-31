@@ -20,7 +20,7 @@ export function validatePluginSettings(app: App, settings: PluginSettings): { ev
   if (!isEventPropertiesDefault(settings.eventPropertiesDefault)) throw new Error('Choose a valid Event Note Properties default.');
   if (!isEventClickAction(settings.eventClickAction)) throw new Error('Choose a valid event click action.');
   folderPath(settings.dailyFolder); folderPath(settings.weeklyFolder);
-  const event = eventNotePath(sample, 'Local', settings);
+  const event = eventNotePath(sample, 'Local', app, settings);
   const daily = dailyNotePath('2026-10-23', app, settings);
   const weekly = weeklyNotePath('2026-10-23', app, settings);
   const normalized = [event, daily, weekly].map(path => path.normalize('NFC').toLocaleLowerCase('en-US'));
@@ -52,8 +52,8 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
     const settings = this.plugin.store.state.settings;
     root.createEl('p', { text: 'Local events work without a calendar subscription.' });
     new Setting(root).setName('Note paths').setHeading();
-    this.text(root, 'Event Note pattern', 'Moment date tokens, {title}, {calendar}, and {uid}.', 'eventPattern');
-    this.sample(root, current => eventNotePath(sample, 'Local', current));
+    this.text(root, 'Event Note pattern', 'Moment date tokens, {title}, {calendar}, and {uid}. Start with {daily}/ to use the folder of the event’s Daily Note, such as {daily}/{title}.', 'eventPattern');
+    this.sample(root, current => eventNotePath(sample, 'Local', this.app, current));
     this.dropdown(root, 'Event Note Properties', 'eventPropertiesDefault', [
       ['obsidian', 'Follow Obsidian'], ['collapsed', 'Collapsed'], ['expanded', 'Expanded'],
     ], 'Initial Properties state when an Event Note opens. You can toggle it in the note.');

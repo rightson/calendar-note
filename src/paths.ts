@@ -1,6 +1,6 @@
 import type { App } from 'obsidian';
 import type { CalendarEvent, PluginSettings, WeekRules } from './types';
-import { formatAt, weekInfo } from './date';
+import { eventCalendarDate, formatAt, weekInfo } from './date';
 import { resolveDailySettings, resolveWeeklySettings, resolveWeekRules } from './settings';
 
 const reserved = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i;
@@ -69,6 +69,7 @@ export function formatNotePath(
       if (close < 0) throw new Error('Placeholder braces are incomplete.');
       const name = pattern.slice(i + 1, close) as keyof FormatValues;
       if (dateOnly) throw new Error('Date note paths use date tokens only.');
+      if (name.toLowerCase() === 'daily') throw new Error(DAILY_PLACEMENT);
       if (!['title', 'calendar', 'uid'].includes(name)) throw new Error(`Unsupported placeholder {${name}}.`);
       protectedPattern += `[⟦CNPLACEHOLDER${variables.length}⟧]`;
       variables.push(cleanSegment(values[name]));
@@ -87,10 +88,33 @@ export function formatNotePath(
   return cleaned.join('/');
 }
 
-export function eventNotePath(event: CalendarEvent, sourceName: string, settings: PluginSettings): string {
-  return formatNotePath(settings.eventPattern, event.start,
+const DAILY_PLACEMENT = '{daily} must start the pattern and be followed by / and the rest of the path.';
+const DAILY_PREFIX = /^\{daily\}\/(.*)$/is;
+
+/** The folder holding the Daily Note for this date; empty at the Vault root. */
+export function dailyNoteFolder(date: string | Date, app: App, settings: PluginSettings): string {
+  const path = dailyNotePath(date, app, settings);
+  return path.slice(0, Math.max(path.lastIndexOf('/'), 0));
+}
+
+/**
+ * A leading `{daily}` segment places the Event Note under the folder of its
+ * Daily Note, so Daily Note formats with folders such as `YYYY/MM/YYYY-MM-DD`
+ * file Event Notes beside that day's note. The folder is inserted after
+ * formatting so its text is never read as Moment tokens.
+ */
+export function eventNotePath(event: CalendarEvent, sourceName: string, app: App, settings: PluginSettings): string {
+  let pattern = typeof settings.eventPattern === 'string' ? settings.eventPattern.trim() : settings.eventPattern;
+  let folder = '';
+  const daily = DAILY_PREFIX.exec(pattern);
+  if (daily) {
+    pattern = daily[1];
+    folder = dailyNoteFolder(eventCalendarDate(event, settings.timeZone), app, settings);
+  }
+  const path = formatNotePath(pattern, event.start,
     { locale: settings.locale, weekMode: settings.weekMode, weekStart: settings.weekStart },
     settings.timeZone, { title: event.title, calendar: sourceName, uid: event.uid });
+  return folder ? `${folder}/${path}` : path;
 }
 
 export function dailyNotePath(date: string | Date, app: App, settings: PluginSettings): string {
