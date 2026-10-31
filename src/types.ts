@@ -14,12 +14,24 @@ export interface CalendarEvent {
   description?: string;
 }
 
+/** A holiday calendar marks the days its events cover instead of only listing them. */
+export type CalendarKind = 'events' | 'holidays';
+/** How a holiday calendar colors the days it covers. */
+export type HolidayShade = 'gray' | 'custom' | 'none';
+
 export interface CalendarSource {
   id: string;
   name: string;
   url: string;
   color: string;
   enabled: boolean;
+  /** Older saved subscriptions have no kind and stay ordinary event calendars. */
+  kind?: CalendarKind;
+  holidayShade?: HolidayShade;
+  /** Day background when `holidayShade` is `custom`. */
+  holidayColor?: string;
+  /** Whether the holiday events themselves appear; their days stay shaded either way. */
+  showHolidayEvents?: boolean;
 }
 
 export interface Interval {
@@ -34,6 +46,10 @@ export type NoteProvider = 'calendar-note' | 'daily-notes' | 'periodic-notes' | 
 export type EventPropertiesDefault = 'obsidian' | 'collapsed' | 'expanded';
 /** What clicking an event in the main calendar does. */
 export type EventClickAction = 'dialog' | 'split' | 'tab';
+/** What clicking a date in the mini calendar does besides moving the main calendar there. */
+export type MiniDateClickAction = 'navigate' | 'split' | 'tab';
+/** What clicking an empty time slot or date cell in the main calendar does. */
+export type MainDateClickAction = 'auto' | 'event' | 'split' | 'tab' | 'none';
 
 export interface WeekRules {
   locale: string;
@@ -44,8 +60,12 @@ export interface WeekRules {
 export interface PluginSettings extends WeekRules {
   sources: CalendarSource[];
   eventPattern: string;
+  /** Move an Event Note to its pattern path when the event's date changes. */
+  moveEventNotes: boolean;
   eventPropertiesDefault: EventPropertiesDefault;
   eventClickAction: EventClickAction;
+  miniDateClickAction: MiniDateClickAction;
+  mainDateClickAction: MainDateClickAction;
   dailyFolder: string;
   dailyFormat: string;
   dailyTemplate: string;
@@ -61,6 +81,10 @@ export interface PluginSettings extends WeekRules {
   sidebarCollapsed: boolean;
   mainCollapsed: boolean;
   workdaysOnly: boolean;
+  /** Add the month calendar to the right sidebar at startup when it is not open anywhere. */
+  monthsOnStartup: boolean;
+  /** Month cards shrink until at least this many months fit the panel. */
+  monthsMinimum: number;
 }
 
 export interface ResolvedNoteSettings {

@@ -10,6 +10,10 @@ export interface NoteLink {
   bullet: string;
   /** A moved Event Note awaits Obsidian's completed link update. */
   pendingRename?: { oldPath: string; newPath: string };
+  /** The event time the Event Note path was last placed for. */
+  placedAt?: { start: string; allDay: boolean };
+  /** The pattern path the Event Note moves to after its date changed. */
+  moveTo?: string;
 }
 
 export interface PathClaim {

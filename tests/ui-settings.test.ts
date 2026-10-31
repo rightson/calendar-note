@@ -25,3 +25,18 @@ test('enabled note providers override fallbacks without changing their blank roo
   assert.deepEqual(resolveDailySettings(app, DEFAULT_SETTINGS), { folder: '', format: 'YYYY/MM/DD', template: 'Templates/Day', provider: 'daily-notes' });
   assert.deepEqual(resolveWeeklySettings(app, DEFAULT_SETTINGS), { folder: '', format: 'GGGG-[W]WW', template: '', provider: 'periodic-notes' });
 });
+
+test('the month calendar joins the right sidebar at startup unless turned off', async () => {
+  const { normalizePluginSettings } = await import('../src/settings');
+  assert.equal(normalizePluginSettings({}).monthsOnStartup, true);
+  assert.equal(normalizePluginSettings({ monthsOnStartup: false }).monthsOnStartup, false);
+  assert.equal(normalizePluginSettings({ monthsOnStartup: 'no' }).monthsOnStartup, true);
+});
+
+test('the minimum month count is a whole number from 1 to 12, else 3', async () => {
+  const { normalizePluginSettings } = await import('../src/settings');
+  assert.equal(normalizePluginSettings({}).monthsMinimum, 3);
+  assert.equal(normalizePluginSettings({ monthsMinimum: 1 }).monthsMinimum, 1);
+  assert.equal(normalizePluginSettings({ monthsMinimum: 12 }).monthsMinimum, 12);
+  for (const bad of [0, 13, 2.5, '4', null]) assert.equal(normalizePluginSettings({ monthsMinimum: bad }).monthsMinimum, 3);
+});

@@ -80,3 +80,28 @@ export function noteSplitLeaf(workspace: Workspace, calendarLeaf: WorkspaceLeaf,
   if (previous && previous !== calendarLeaf) workspace.iterateAllLeaves(leaf => { if (leaf === previous) open = true; });
   return open ? previous! : oppositeTabLeaf(workspace, calendarLeaf) ?? workspace.createLeafBySplit(calendarLeaf, 'vertical');
 }
+
+export const FILE_EXPLORER_VIEW_TYPE = 'file-explorer';
+
+/**
+ * A leaf stacked under the file explorer in the left sidebar, so the two share it
+ * one above the other. Without an explorer there, a new group at the bottom of the
+ * left sidebar.
+ */
+export function leafBelowFileExplorer(workspace: Workspace): WorkspaceLeaf | null {
+  const explorer = workspace.getLeavesOfType(FILE_EXPLORER_VIEW_TYPE).find(leaf => leaf.getRoot() === workspace.leftSplit);
+  return explorer ? workspace.createLeafBySplit(explorer, 'horizontal') : workspace.getLeftLeaf(true);
+}
+
+/**
+ * Adds a view to the right sidebar unless one is already open anywhere, so a
+ * tab the user dragged elsewhere (for example under the file explorer) stays put.
+ * Returns the leaf it created, if any. It does not take focus.
+ */
+export async function ensureSidebarView(workspace: Workspace, viewType: string): Promise<WorkspaceLeaf | undefined> {
+  if (workspace.getLeavesOfType(viewType).length) return undefined;
+  const leaf = workspace.getRightLeaf(false);
+  if (!leaf) return undefined;
+  await leaf.setViewState({ type: viewType, active: false });
+  return leaf;
+}

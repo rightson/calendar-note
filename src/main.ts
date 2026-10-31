@@ -2,7 +2,8 @@ import { Modal, Notice, Plugin, TFile, requestUrl } from 'obsidian';
 import { CalendarNoteView, CALENDAR_VIEW_TYPE } from './calendar-view';
 import { AgendaView, AGENDA_VIEW_TYPE, AGENDA_HOVER_SOURCE } from './agenda-view';
 import { unionRange } from './agenda-layout';
-import { calendarOpenModeForClick, openCalendarLeaf, type CalendarOpenMode } from './calendar-open';
+import { MonthsView, MONTHS_VIEW_TYPE } from './months-view';
+import { calendarOpenModeForClick, ensureSidebarView, leafBelowFileExplorer, openCalendarLeaf, type CalendarOpenMode } from './calendar-open';
 import { EventPropertiesController } from './event-properties';
 import { ChangeHistoryModal } from './modals';
 import { EventNoteProblemsModal } from './problems-modal';
@@ -33,6 +34,8 @@ export default class CalendarNotePlugin extends Plugin {
   private scanTimer?: number;
   private scanning?: Promise<void>;
   private scanAgain = false;
+  private moving?: Promise<void>;
+  private moveAgain = false;
   private disposed = false;
   private ready = false;
   private lastDiagnostics = '';
@@ -63,14 +66,17 @@ export default class CalendarNotePlugin extends Plugin {
       const result = await requestUrl({ url, headers, method: 'GET', throw: false });
       return { status: result.status, text: result.text, headers: result.headers };
     });
-    this.store.onChange = () => { this.updateEventsFromCache(); this.refreshViews(); };
+    this.store.onChange = () => { this.updateEventsFromCache(); this.refreshViews(); this.scheduleMoves(); };
     this.registerView(CALENDAR_VIEW_TYPE, leaf => new CalendarNoteView(leaf, this));
+    this.registerView(MONTHS_VIEW_TYPE, leaf => new MonthsView(leaf, this));
     this.registerView(AGENDA_VIEW_TYPE, leaf => new AgendaView(leaf, this));
     this.registerHoverLinkSource(AGENDA_HOVER_SOURCE, { display: 'Calendar Note events sidebar', defaultMod: false });
     this.addRibbonIcon('calendar-days', 'Open Calendar Note', evt => void this.openCalendar(calendarOpenModeForClick(evt)));
     this.addRibbonIcon('calendar-clock', 'Open Calendar Note events sidebar', () => void this.openAgenda());
     this.addCommand({ id: 'open-calendar', name: 'Open calendar in new tab', callback: () => void this.openCalendar('tab') });
     this.addCommand({ id: 'open-calendar-right', name: 'Open calendar in right split', callback: () => void this.openCalendar('right-split') });
+    this.addCommand({ id: 'open-months', name: 'Open month calendar in sidebar', callback: () => void this.openMonths() });
+    this.addCommand({ id: 'open-months-below-explorer', name: 'Move month calendar below the file explorer', callback: () => void this.openMonths('below-explorer') });
     this.addCommand({ id: 'open-events-sidebar', name: 'Open events sidebar', callback: () => void this.openAgenda() });
     this.addCommand({ id: 'new-event', name: 'New event', callback: () => void this.openCalendar().then(view => view.newEvent()) });
     this.addCommand({ id: 'remove-duplicate-event-title', name: 'Remove duplicate Event Note title', checkCallback: checking => {
@@ -119,7 +125,9 @@ export default class CalendarNotePlugin extends Plugin {
       if (this.disposed) return;
       this.ready = true;
       void this.runAction(async () => { await this.notes.finalizePendingRenames(); }).then(() => this.rescan());
+      this.scheduleMoves();
       this.subscriptions.start();
+      if (this.store.state.settings.monthsOnStartup) void ensureSidebarView(this.app.workspace, MONTHS_VIEW_TYPE);
       if (this.range) void this.refresh(false);
       if (this.store.recoveryConflict) this.showRecovery();
     });
@@ -137,12 +145,17 @@ export default class CalendarNotePlugin extends Plugin {
     return this.app.workspace.getLeavesOfType(CALENDAR_VIEW_TYPE)
       .map(leaf => leaf.view).filter((view): view is CalendarNoteView => view instanceof CalendarNoteView);
   }
+  private getMonthsViews(): MonthsView[] {
+    return this.app.workspace.getLeavesOfType(MONTHS_VIEW_TYPE)
+      .map(leaf => leaf.view).filter((view): view is MonthsView => view instanceof MonthsView);
+  }
   private getAgendaViews(): AgendaView[] {
     return this.app.workspace.getLeavesOfType(AGENDA_VIEW_TYPE)
       .map(leaf => leaf.view).filter((view): view is AgendaView => view instanceof AgendaView);
   }
   private refreshViews(): void {
     for (const view of this.getViews()) view.refresh();
+    for (const view of this.getMonthsViews()) view.refresh();
     for (const view of this.getAgendaViews()) view.refresh();
     this.settingTab?.refreshSubscriptionStatus();
   }
@@ -167,6 +180,21 @@ export default class CalendarNotePlugin extends Plugin {
     return leaf.view as CalendarNoteView;
   }
 
+  /**
+   * Reveal the month calendar where it is, adding it to the right sidebar the
+   * first time; 'below-explorer' moves it under the file explorer instead.
+   */
+  async openMonths(place: 'sidebar' | 'below-explorer' = 'sidebar'): Promise<void> {
+    const workspace = this.app.workspace;
+    const existing = workspace.getLeavesOfType(MONTHS_VIEW_TYPE);
+    if (place === 'below-explorer') existing.forEach(leaf => leaf.detach());
+    const reuse = place === 'sidebar' ? existing[0] : undefined;
+    const leaf = reuse ?? (place === 'below-explorer' ? leafBelowFileExplorer(workspace) : workspace.getRightLeaf(false));
+    if (!leaf) return;
+    if (!reuse) await leaf.setViewState({ type: MONTHS_VIEW_TYPE, active: true });
+    await workspace.revealLeaf(leaf);
+  }
+
   /** Open the events sidebar in the right sidebar, or reveal the one already there. */
   async openAgenda(): Promise<void> {
     await this.app.workspace.ensureSideLeaf(AGENDA_VIEW_TYPE, 'right', { active: true, reveal: true });
@@ -185,8 +213,8 @@ export default class CalendarNotePlugin extends Plugin {
     if (!this.ready || this.store.recoveryConflict) return;
     if (unchanged) { this.updateEventsFromCache(); this.refreshViews(); return; }
     await this.runAction(async () => {
-      await this.subscriptions.setRange(range);
-      await this.subscriptions.refresh(range);
+      await this.subscriptions.setRange(next);
+      await this.subscriptions.refresh(next);
       this.updateEventsFromCache(); this.refreshViews();
     });
   }
@@ -204,6 +232,27 @@ export default class CalendarNotePlugin extends Plugin {
       if (this.range) await this.subscriptions.refresh(this.range, { force });
       this.updateEventsFromCache(); this.refreshViews();
     });
+  }
+
+  /**
+   * Move Event Notes whose date changed once the commit that recorded the move
+   * has returned; renameFile calls back into the note service's queue, so it
+   * cannot run inside that queue.
+   */
+  private scheduleMoves(): void {
+    if (!this.ready || this.disposed || this.store.recoveryConflict) return;
+    if (!Object.values(this.store.state.noteLinks).some(link => link.moveTo && !link.pendingRename)) return;
+    if (this.moving) { this.moveAgain = true; return; }
+    this.moving = (async () => {
+      await Promise.resolve();
+      do {
+        this.moveAgain = false;
+        try {
+          const failures = await this.notes.settleMoves();
+          for (const failure of failures) new Notice(failure);
+        } catch (error) { new Notice(error instanceof Error ? error.message : 'Could not move Event Notes.'); }
+      } while (this.moveAgain && !this.disposed);
+    })().finally(() => { this.moving = undefined; });
   }
 
   private scheduleScan(): void {
@@ -331,6 +380,7 @@ export default class CalendarNotePlugin extends Plugin {
     await this.store.commit([], state => { state.settings = settings; });
     if (settings.eventPropertiesDefault !== previousPropertiesDefault) this.eventProperties?.settingsChanged();
     for (const view of this.getViews()) view.settingsChanged();
+    for (const view of this.getMonthsViews()) view.refresh();
     for (const view of this.getAgendaViews()) view.settingsChanged();
     this.subscriptions.dispose();
     this.subscriptions = new SubscriptionService(this.store, this.sync, async (url, headers) => {

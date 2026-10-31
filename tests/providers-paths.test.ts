@@ -3,7 +3,7 @@ import test from 'node:test';
 import moment from 'moment-timezone';
 import type { App } from 'obsidian';
 import { dateAt, formatAt, weekInfo } from '../src/date';
-import { cleanSegment, dailyNotePath, eventNotePath, folderPath, formatNotePath, weeklyNotePath } from '../src/paths';
+import { cleanSegment, dailyNoteFolder, dailyNotePath, eventNotePath, folderPath, formatNotePath, weeklyNotePath } from '../src/paths';
 import { DEFAULT_SETTINGS, resolveDailySettings, resolveWeekRules, resolveWeeklySettings } from '../src/settings';
 import type { CalendarEvent, PluginSettings, WeekRules, WeekStart } from '../src/types';
 
@@ -128,10 +128,40 @@ test('event variables are sanitized after Moment formatting and cannot create pa
     id: 'local:uid', sourceId: 'local', uid: 'UID/YYYY/../../CON', title: 'YYYY/MMM: Q4?*',
     start: '2026-10-23T09:00:00+08:00', end: '2026-10-23T10:00:00+08:00', allDay: false,
   };
-  assert.equal(eventNotePath(event, 'Team/2026', settings({ eventPattern: '[Calendar Notes]/YYYY/MMMM/{title} - {calendar} - {uid}' })),
+  assert.equal(eventNotePath(event, 'Team/2026', app({}, []), settings({ eventPattern: '[Calendar Notes]/YYYY/MMMM/{title} - {calendar} - {uid}' })),
     'Calendar Notes/2026/October/YYYY MMM Q4 - Team 2026 - UID YYYY .. .. CON.md');
   assert.equal(formatNotePath('[literal]/YYYY/MM/DD/\\{title}', '2026-10-23', settings(), zone),
     'literal/2026/10/23/{title}.md');
+});
+
+test('a leading {daily} files Event Notes in the folder of their Daily Note', () => {
+  const event: CalendarEvent = {
+    id: 'local:uid', sourceId: 'local', uid: 'uid', title: 'Standup',
+    start: '2026-10-22T17:30:00Z', end: '2026-10-22T18:00:00Z', allDay: false,
+  };
+  const core = { enabled: true, instance: { options: { folder: 'Journal', format: 'YYYY/MM/YYYY-MM-DD' } } };
+  const coreApp = app({}, [], core);
+  // 17:30Z is already 2026-10-23 in Taipei, the same day that selects the Daily Note.
+  assert.equal(dailyNotePath('2026-10-23', coreApp, settings()), 'Journal/2026/10/2026-10-23.md');
+  assert.equal(eventNotePath(event, 'Local', coreApp, settings({ eventPattern: '{daily}/{title}' })),
+    'Journal/2026/10/Standup.md');
+  assert.equal(eventNotePath(event, 'Local', coreApp, settings({ eventPattern: ' {Daily}/[Events]/HHmm {title} ' })),
+    'Journal/2026/10/Events/0130 Standup.md');
+  // The Daily Note folder is not read as Moment tokens.
+  const fallback = settings({ dailyFolder: 'Days', dailyFormat: 'YYYY-MM-DD', eventPattern: '{daily}/{title}' });
+  assert.equal(eventNotePath(event, 'Local', app({}, []), fallback), 'Days/Standup.md');
+  // A Daily Note at the Vault root leaves the Event Note at the root too.
+  assert.equal(dailyNoteFolder('2026-10-23', app({}, []), settings({ dailyFolder: '' })), '');
+  assert.equal(eventNotePath(event, 'Local', app({}, []), settings({ dailyFolder: '', eventPattern: '{daily}/{title}' })),
+    'Standup.md');
+  // All-day events use their calendar date, not the instant converted to the display zone.
+  const allDay = { ...event, start: '2026-10-23', end: '2026-10-24', allDay: true };
+  assert.equal(eventNotePath(allDay, 'Local', coreApp, settings({ eventPattern: '{daily}/{title}', timeZone: 'America/Los_Angeles' })),
+    'Journal/2026/10/Standup.md');
+  for (const pattern of ['{daily}', '{daily}/', 'Notes/{daily}/{title}', '{title} {daily}', '{daily}/{daily}/{title}']) {
+    assert.throws(() => eventNotePath(event, 'Local', coreApp, settings({ eventPattern: pattern })), pattern);
+  }
+  assert.equal(eventNotePath(event, 'Local', coreApp, settings({ eventPattern: '\\{daily}/{title}' })), '{daily}/Standup.md');
 });
 
 test('nested formats, literal folders, and all dates in one week give one weekly path', () => {

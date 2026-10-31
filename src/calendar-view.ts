@@ -7,15 +7,17 @@ import multiMonthPlugin from '@fullcalendar/multimonth';
 import interactionPlugin, { type DateClickArg, type EventResizeDoneArg } from '@fullcalendar/interaction';
 import momentTimezonePlugin from '@fullcalendar/moment-timezone';
 import moment from 'moment-timezone';
-import { dateAt, weekInfo } from './date';
+import { dateAt, firstWeekday, weekInfo } from './date';
 import { resolveWeekRules } from './settings';
 import type { CalendarEvent, Interval, PluginSettings } from './types';
 import type CalendarNotePlugin from './main';
 import { EventActions } from './event-actions';
 import { miniMonthColumns, visibleMonthCount } from './calendar-layout';
 import { editMenuTitle, eventsAt, type PointerSpan } from './calendar-menu';
+import { mainDateClick, miniDateClick, type NotePlacement } from './calendar-click';
 import { sidebarWidthForContainer, resizeSidebarWithKeyboard, togglePanel, type CalendarPanel } from './sidebar-layout';
 import { subscriptionFailureMessage } from './subscription-settings';
+import { holidayDays, showsEvent, type HolidayDay } from './holidays';
 
 export const CALENDAR_VIEW_TYPE = 'calendar-note-calendar';
 export const CALENDAR_VIEWS = [
@@ -54,6 +56,7 @@ export class CalendarNoteView extends ItemView {
   private sidebarPersistTimer?: number;
   private pendingSidebarWidth?: number;
   private viewType = 'timeGridWeek';
+  private holidays = new Map<string, HolidayDay>();
 
   private readonly actions: EventActions;
 
@@ -155,6 +158,7 @@ export class CalendarNoteView extends ItemView {
     this.listDatesEl = content.createDiv({ cls: 'cn-list-dates' });
     const grid = content.createDiv({ cls: 'cn-calendar' });
     const rules = resolveWeekRules(this.app, this.settings);
+    this.updateHolidays();
     this.calendar = new Calendar(grid, {
       plugins: [dayGridPlugin, timeGridPlugin, listPlugin, multiMonthPlugin, interactionPlugin, momentTimezonePlugin],
       initialView: this.viewType,
@@ -294,10 +298,7 @@ export class CalendarNoteView extends ItemView {
     this.renderMini();
   }
   private firstDay(): number {
-    const rules = resolveWeekRules(this.app, this.settings);
-    if (rules.weekMode === 'iso') return 1;
-    const names = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-    return rules.weekStart === 'locale' ? dateAt(new Date(), this.settings.timeZone).locale(rules.locale).localeData().firstDayOfWeek() : names.indexOf(rules.weekStart);
+    return firstWeekday(resolveWeekRules(this.app, this.settings), this.settings.timeZone);
   }
   private applySidebarLayout(requested = this.pendingSidebarWidth ?? this.settings.sidebarWidth): void {
     if (!this.shellEl || !this.sidebarEl || !this.separatorEl) return;
@@ -309,9 +310,10 @@ export class CalendarNoteView extends ItemView {
     this.shellEl.toggleClass('is-main-collapsed', mainCollapsed);
     this.shellEl.toggleClass('is-sidebar-overlay', overlay);
     this.sidebarEl.style.width = mainCollapsed ? '' : `${overlay ? Math.min(260, Math.max(0, this.shellEl.clientWidth - 16)) : width}px`;
-    if (this.miniNavTitle) this.miniNavTitle.title = mainCollapsed
-      ? 'Dates open Daily Notes and week numbers open Weekly Notes beside the calendar.'
-      : 'Dates navigate the calendar. Week numbers open Weekly Notes.';
+    const placement = miniDateClick(this.settings.miniDateClickAction, mainCollapsed);
+    const dates = placement === 'split' ? 'Dates open Daily Notes beside the calendar.'
+      : placement === 'tab' ? 'Dates open Daily Notes in a new tab.' : 'Dates navigate the calendar.';
+    if (this.miniNavTitle) this.miniNavTitle.title = `${dates} Week numbers open Weekly Notes${mainCollapsed ? ' beside the calendar' : ''}.`;
     this.separatorEl.setAttribute('aria-valuenow', String(width || requested));
     this.updateDisplayControls();
     if (this.layoutResizeFrame) cancelAnimationFrame(this.layoutResizeFrame);
@@ -390,7 +392,13 @@ export class CalendarNoteView extends ItemView {
     return this.miniOnly ? this.actions.besideTarget : this.actions.tabTarget;
   }
   private async openWeek(day: string): Promise<void> { await this.plugin.runAction(() => this.plugin.notes.openWeekly(day, this.noteTarget())); }
-  private async openDay(day: string): Promise<void> { this.selectedDay = day; this.renderMini(); await this.plugin.runAction(() => this.plugin.notes.openDaily(day, this.noteTarget())); }
+  private placementTarget(placement?: NotePlacement): () => WorkspaceLeaf {
+    return placement === 'split' ? this.actions.besideTarget : placement === 'tab' ? this.actions.tabTarget : this.noteTarget();
+  }
+  private async openDay(day: string, placement?: NotePlacement): Promise<void> {
+    this.selectedDay = day; this.renderMini();
+    await this.plugin.runAction(() => this.plugin.notes.openDaily(day, this.placementTarget(placement)));
+  }
   private renderMini(): void {
     if (!this.miniEl || !this.miniMonth) return;
     const first = dateAt(this.miniMonth, this.settings.timeZone).locale('en');
@@ -428,13 +436,21 @@ export class CalendarNoteView extends ItemView {
         const day = start.clone().add(row * 7 + col, 'days').format('YYYY-MM-DD');
         const td = tr.createEl('td');
         if (day.slice(0, 7) !== monthDate.format('YYYY-MM')) td.addClass('is-outside');
-        const miniOnly = this.miniOnly;
+        const placement = miniDateClick(this.settings.miniDateClickAction, this.miniOnly);
         const button = this.button(td, String(Number(day.slice(-2))), () => {
           this.selectedDay = day; this.calendar?.gotoDate(day); this.renderMini();
-          if (miniOnly) void this.openDay(day);
-        }, miniOnly ? `Open Daily Note for ${day}` : `Navigate to ${day}`);
+          if (placement) void this.openDay(day, placement);
+        }, placement ? `Open Daily Note for ${day}` : `Navigate to ${day}`);
         if (day === this.today()) button.addClass('is-today');
         if (day === this.selectedDay) button.addClass('is-selected');
+        const holiday = this.holidays.get(day);
+        if (holiday) {
+          button.addClass('is-holiday');
+          if (holiday.color) button.style.setProperty('--cn-holiday-color', holiday.color);
+          else button.addClass('is-holiday-unshaded');
+          button.title = holiday.titles.join(', ');
+          button.setAttribute('aria-label', `${button.getAttribute('aria-label') ?? day} (${holiday.titles.join(', ')})`);
+        }
       }
     }
     return card;
@@ -491,12 +507,27 @@ export class CalendarNoteView extends ItemView {
     });
   }
   private eventInputs(): EventInput[] {
-    return this.plugin.events.filter(event => event.status !== 'cancelled' && event.status !== 'removed').map(event => ({
+    const sources = this.settings.sources;
+    const events: EventInput[] = this.plugin.events.filter(event => showsEvent(event, sources)).map(event => ({
       id: event.id, title: event.title, start: event.start,
       ...(!event.allDay && Date.parse(event.start) === Date.parse(event.end) ? {} : { end: event.end }),
       allDay: event.allDay,
-      backgroundColor: this.settings.sources.find(source => source.id === event.sourceId)?.color ?? undefined,
+      backgroundColor: sources.find(source => source.id === event.sourceId)?.color ?? undefined,
     }));
+    // One whole-day background per holiday date: it fills the day's column in time grids and its cell in Month and Year.
+    for (const [day, holiday] of this.holidays) {
+      if (!holiday.color) continue;
+      events.push({
+        id: `holiday-background|${day}`, start: day, end: dateAt(day, this.settings.timeZone).add(1, 'day').format('YYYY-MM-DD'),
+        allDay: true, display: 'background', backgroundColor: holiday.color, classNames: ['cn-holiday-background'], editable: false,
+      });
+    }
+    return events;
+  }
+  /** Holidays come from every cached event of holiday calendars, so the mini calendar can mark months outside the main view. */
+  private updateHolidays(): void {
+    const all = this.plugin.subscriptions?.getEvents({ start: new Date(0).toISOString(), end: new Date(8640000000000000).toISOString() });
+    this.holidays = holidayDays(all ?? this.plugin.events, this.settings.sources, this.settings.timeZone);
   }
   private updateSubscriptionFailure(): void {
     if (!this.subscriptionFailureEl) return;
@@ -513,6 +544,7 @@ export class CalendarNoteView extends ItemView {
       this.problemsEl.setText(`⚠ ${this.plugin.problemCount} note ${this.plugin.problemCount === 1 ? 'problem' : 'problems'}`);
     }
     this.updateSubscriptionFailure();
+    this.updateHolidays();
     this.calendar.refetchEvents();
     this.renderMini();
   }
@@ -536,11 +568,12 @@ export class CalendarNoteView extends ItemView {
     this.refresh();
   }
   private handleDateClick(arg: DateClickArg): void {
-    const type = arg.view.type;
-    if (type === 'dayGridMonth' || type === 'multiMonthYear' || type === 'listWeek') {
-      void this.openDay(arg.dateStr.slice(0, 10)); return;
-    }
+    // Day numbers and week numbers sit inside date cells and handle their own clicks.
+    if ((arg.jsEvent.target as HTMLElement | null)?.closest('.cn-date-open, .fc-daygrid-day-number, .fc-daygrid-week-number')) return;
     const day = arg.dateStr.slice(0, 10);
+    const action = mainDateClick(this.settings.mainDateClickAction, arg.view.type);
+    if (action.kind === 'none') return;
+    if (action.kind === 'daily') { void this.openDay(day, action.placement); return; }
     this.newEvent({ start: arg.allDay ? day : arg.date.toISOString(),
       end: arg.allDay ? dateAt(day, this.settings.timeZone).add(1, 'day').format('YYYY-MM-DD')
         : dateAt(arg.date, this.settings.timeZone).add(this.settings.defaultDurationMinutes, 'minutes').toISOString(), allDay: arg.allDay });
@@ -556,7 +589,8 @@ export class CalendarNoteView extends ItemView {
     const span = this.pointerSpan(e, clicked);
     const menu = new Menu();
     menu.addItem(item => item.setTitle('New event').setIcon('plus').onClick(() => this.newEvent(this.newEventInterval(span))));
-    const events = eventsAt(this.plugin.events, span, this.settings.timeZone, clicked);
+    const shown = this.plugin.events.filter(event => showsEvent(event, this.settings.sources));
+    const events = eventsAt(shown, span, this.settings.timeZone, clicked);
     if (events.length) menu.addSeparator();
     for (const event of events) {
       menu.addItem(item => item.setTitle(editMenuTitle(event, this.settings.timeZone)).setIcon('pencil').onClick(() => this.actions.showDetails(event)));

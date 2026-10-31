@@ -1,7 +1,7 @@
 import moment from 'moment-timezone';
 import 'moment/locale/en-gb';
 import 'moment/locale/zh-tw';
-import type { CalendarWeek, WeekRules } from './types';
+import type { CalendarEvent, CalendarWeek, WeekRules } from './types';
 
 export function dateAt(value: string | Date, zone: string): moment.Moment {
   if (!moment.tz.zone(zone)) throw new Error(`Unknown time zone: ${zone}`);
@@ -13,6 +13,13 @@ export function dateAt(value: string | Date, zone: string): moment.Moment {
   const date = moment(value).tz(zone);
   if (!date.isValid()) throw new Error('Invalid calendar date.');
   return date;
+}
+
+/** The display-zone calendar date an event belongs to, which selects its Daily Note. */
+export function eventCalendarDate(event: Pick<CalendarEvent, 'start' | 'allDay'>, zone: string): string {
+  // iCalendar all-day dates are calendar dates, not instants to convert into
+  // the display zone. Their exclusive end follows the same rule.
+  return event.allDay ? event.start.slice(0, 10) : dateAt(event.start, zone).format('YYYY-MM-DD');
 }
 
 type ScopedMoment = moment.Moment & { _locale?: moment.Locale };
@@ -42,4 +49,12 @@ export function weekInfo(value: string | Date, rules: WeekRules, zone: string): 
 
 export function formatAt(value: string | Date, format: string, rules: WeekRules, zone: string): string {
   return scopedWeekDate(value, rules, zone).date.format(format);
+}
+
+const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+/** The first column of a week row, 0 for Sunday through 6 for Saturday. */
+export function firstWeekday(rules: WeekRules, zone: string, now: Date = new Date()): number {
+  if (rules.weekMode === 'iso') return 1;
+  return rules.weekStart === 'locale' ? dateAt(now, zone).locale(rules.locale).localeData().firstDayOfWeek() : WEEKDAYS.indexOf(rules.weekStart);
 }

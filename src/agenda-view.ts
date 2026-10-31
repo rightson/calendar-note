@@ -4,6 +4,7 @@ import { resolveWeekRules } from './settings';
 import type CalendarNotePlugin from './main';
 import type { CalendarEvent, PluginSettings } from './types';
 import { EventActions } from './event-actions';
+import { showsEvent } from './holidays';
 import {
   AGENDA_HOUR_HEIGHT, AGENDA_LIST_DAYS, AGENDA_MIN_BLOCK_MINUTES, addDays, agendaDays, dayRange, daysWithEvents,
   draggedInterval, eventTimeLabel, eventsOnDay, instantAt, snappedMinutes, weekDays, type PlacedEvent,
@@ -74,6 +75,10 @@ export class AgendaView extends ItemView implements HoverParent {
     await super.setState(state, result);
   }
 
+  /** The events the main calendar shows: holiday calendars set to hide their events stay out here too. */
+  private shownEvents(): CalendarEvent[] {
+    return this.plugin.events.filter(event => showsEvent(event, this.settings.sources));
+  }
   private get settings(): PluginSettings { return this.plugin.store.state.settings; }
   private get zone(): string { return this.settings.timeZone; }
   private today(): string { return dateAt(new Date(), this.zone).format('YYYY-MM-DD'); }
@@ -220,7 +225,7 @@ export class AgendaView extends ItemView implements HoverParent {
       button.setAttribute('aria-pressed', String(mode === this.mode));
     }
 
-    const busy = daysWithEvents(this.plugin.events, days, zone);
+    const busy = daysWithEvents(this.shownEvents(), days, zone);
     this.stripEl.empty();
     for (const day of days) {
       const date = dateAt(day, zone).locale('en');
@@ -255,7 +260,7 @@ export class AgendaView extends ItemView implements HoverParent {
 
   private renderDay(previousScroll: number): void {
     const body = this.bodyEl!;
-    const { allDay, timed } = eventsOnDay(this.plugin.events, this.selectedDay, this.zone);
+    const { allDay, timed } = eventsOnDay(this.shownEvents(), this.selectedDay, this.zone);
     if (allDay.length) {
       const row = body.createDiv({ cls: 'cn-agenda-allday' });
       row.createSpan({ cls: 'cn-agenda-allday-label', text: 'all-day' });
@@ -333,7 +338,7 @@ export class AgendaView extends ItemView implements HoverParent {
     this.scrollEl = scroll;
     const today = this.today();
     const now = Date.now();
-    for (const { day, events } of agendaDays(this.plugin.events, this.selectedDay, AGENDA_LIST_DAYS, this.zone)) {
+    for (const { day, events } of agendaDays(this.shownEvents(), this.selectedDay, AGENDA_LIST_DAYS, this.zone)) {
       const section = scroll.createDiv({ cls: 'cn-agenda-list-day' });
       const date = dateAt(day, this.zone).locale('en');
       const head = section.createEl('button', { cls: 'cn-agenda-list-heading', attr: { type: 'button', 'aria-label': `Open Daily Note for ${day}` } });

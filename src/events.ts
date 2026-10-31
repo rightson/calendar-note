@@ -1,6 +1,6 @@
 import type { App, TFile, WorkspaceLeaf } from 'obsidian';
-import { dateAt, weekInfo } from './date';
-import { dailyNotePath, eventNotePath, weeklyNotePath } from './paths';
+import { dateAt, eventCalendarDate, weekInfo } from './date';
+import { dailyNotePath, eventNotePath, followPatternPath, weeklyNotePath } from './paths';
 import { resolveDailySettings, resolveWeeklySettings, resolveWeekRules } from './settings';
 import { pathKey, type NoteLink } from './state';
 import { CalendarStore, type PlannedWrite } from './store';
@@ -20,12 +20,6 @@ export interface IntervalWritePlan {
   writes: PlannedWrite[];
   link?: NoteLink;
   event: CalendarEvent;
-}
-
-function eventCalendarDate(event: CalendarEvent, zone: string): string {
-  // iCalendar all-day dates are calendar dates, not instants to convert into
-  // the display zone. Their exclusive end follows the same rule.
-  return event.allDay ? event.start.slice(0, 10) : dateAt(event.start, zone).format('YYYY-MM-DD');
 }
 
 function sameEffectiveInterval(note: { start: string; end: string; allDay: boolean }, source: CalendarEvent): boolean {
@@ -82,18 +76,25 @@ export class EventNoteService {
       catch { /* an invalid linked note is reported by planEventWrites */ }
     }
     if (previous) return previous;
-    const settings = this.getSettings();
-    const sourceName = settings.sources.find(source => source.id === event.sourceId)?.name ?? (event.sourceId === 'local' ? 'Local' : event.sourceId);
-    const base = eventNotePath(event, sourceName, settings);
+    return this.freeEventPath(eventNotePath(event, this.sourceName(event), this.app, this.getSettings()), event.id);
+  }
+
+  private sourceName(event: CalendarEvent): string {
+    return this.getSettings().sources.find(source => source.id === event.sourceId)?.name
+      ?? (event.sourceId === 'local' ? 'Local' : event.sourceId);
+  }
+
+  /** `base`, or `base (2)` and so on when another note or claim holds it. */
+  private async freeEventPath(base: string, id: string): Promise<string> {
     const known = new Set((await this.store.io.listMarkdown()).map(pathKey));
     for (let number = 1; number < 10_000; number++) {
       const candidate = number === 1 ? base : base.replace(/\.md$/i, ` (${number}).md`);
       const claim = this.store.state.pathTypes[pathKey(candidate)];
-      if (claim && (claim.type !== 'event' || claim.ownerId !== event.id)) continue;
+      if (claim && (claim.type !== 'event' || claim.ownerId !== id)) continue;
       if (!known.has(pathKey(candidate))) return candidate;
       const content = await this.store.io.read(candidate);
       if (content) {
-        try { if (parseEventNote(content, candidate)?.id === event.id) return candidate; }
+        try { if (parseEventNote(content, candidate)?.id === id) return candidate; }
         catch { /* occupied by another or invalid note */ }
       }
     }
@@ -512,8 +513,9 @@ export class EventNoteService {
     const notePath = await this.availableEventPath(event);
     await this.assertPathType(notePath, 'event', event.id);
     const noteBefore = await this.store.io.read(notePath);
+    let parsed: ReturnType<typeof parseEventNote> = null;
     if (noteBefore) {
-      const parsed = parseEventNote(noteBefore, notePath);
+      parsed = parseEventNote(noteBefore, notePath);
       if (!parsed || parsed.id !== event.id) throw new Error('Event Note identity changed; relink it before writing.');
       if (event.sourceId === 'local') {
         if (parsed.source || parsed.uid || parsed.recurrenceId) throw new Error('Event Note source identity conflicts with this local event.');
@@ -559,8 +561,77 @@ export class EventNoteService {
     const dailyAfter = upsertEventBullet(dailyBase, bullet, notePaths);
     if (noteAfter !== noteBefore) writes.push({ path: notePath, before: noteBefore, after: noteAfter, type: 'event', ownerId: event.id });
     if (dailyAfter !== dailyBefore) writes.push({ path: dailyPath, before: dailyBefore, after: dailyAfter, type: 'daily' });
-    const link = { eventPath: notePath, dailyPath, bullet };
+    const link: NoteLink = { eventPath: notePath, dailyPath, bullet, placedAt: { start: event.start, allDay: event.allDay } };
+    const moveTo = this.plannedMove(event, notePath, previous, parsed);
+    if (moveTo) link.moveTo = moveTo;
     return { writes, notePath, dailyPath, bullet, link };
+  }
+
+  /**
+   * Where the Event Note goes when the event's new time puts it in another
+   * folder of the pattern, as `{daily}` or date tokens do. Only a note still
+   * where the pattern placed it moves; the move itself happens in settleMoves,
+   * after the commit, so Obsidian can update links to the note.
+   */
+  private plannedMove(event: CalendarEvent, notePath: string, previous: NoteLink | undefined,
+    parsed: ReturnType<typeof parseEventNote>): string | undefined {
+    if (!this.getSettings().moveEventNotes) return undefined;
+    // A newly created or newly chosen note stays where it is.
+    if (!previous || previous.pendingRename || pathKey(previous.eventPath) !== pathKey(notePath)) return undefined;
+    const placedAt = previous.placedAt ?? (parsed ? { start: parsed.start, allDay: parsed.allDay } : undefined);
+    if (!placedAt) return undefined;
+    // A move not carried out yet already put the note on its way there.
+    const current = previous.moveTo ?? notePath;
+    let target: string | undefined;
+    try {
+      target = followPatternPath(current, { ...event, start: placedAt.start, allDay: placedAt.allDay }, event,
+        this.sourceName(event), this.app, this.getSettings());
+    } catch { return undefined; }
+    return target && pathKey(target) !== pathKey(notePath) ? target : undefined;
+  }
+
+  /**
+   * Move Event Notes whose date change gave them a new pattern path. Not
+   * serialized: the rename's link update reaches handleRename and
+   * finalizePendingRenames, which queue behind any running work. Returns a
+   * message for each note that could not move; it stays where it was.
+   */
+  async settleMoves(): Promise<string[]> {
+    const failures: string[] = [];
+    for (const [id, link] of Object.entries(this.store.state.noteLinks)) {
+      const target = link.moveTo;
+      if (!target || link.pendingRename) continue;
+      const from = link.eventPath;
+      try {
+        const file = this.app.vault.getAbstractFileByPath(from);
+        const content = await this.store.io.read(from);
+        let holds = false;
+        try { holds = content !== null && parseEventNote(content, from)?.id === id; }
+        catch { /* an invalid note is reported by the scan */ }
+        // Turning the setting off cancels moves not carried out yet.
+        if (file && holds && this.getSettings().moveEventNotes) {
+          const destination = await this.freeEventPath(target, id);
+          await this.ensureFolder(destination);
+          await this.app.fileManager.renameFile(file, destination);
+        }
+      } catch (error) {
+        failures.push(`Could not move ${from} to ${target}: ${error instanceof Error ? error.message : 'unknown error'}`);
+      }
+      // A completed rename already cleared it; anything else is not retried.
+      await this.serialized(async () => {
+        if (this.store.state.noteLinks[id]?.moveTo !== target) return;
+        await this.store.commit([], state => { delete state.noteLinks[id].moveTo; });
+      });
+    }
+    return failures;
+  }
+
+  private async ensureFolder(path: string): Promise<void> {
+    let folder = '';
+    for (const part of path.split('/').slice(0, -1)) {
+      folder = folder ? `${folder}/${part}` : part;
+      if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
+    }
   }
 
   /**
@@ -707,10 +778,8 @@ export class EventNoteService {
    * held by another event are left out.
    */
   async noteCandidates(event: CalendarEvent): Promise<string[]> {
-    const settings = this.getSettings();
-    const sourceName = settings.sources.find(source => source.id === event.sourceId)?.name ?? (event.sourceId === 'local' ? 'Local' : event.sourceId);
     const current = this.store.state.noteLinks[event.id]?.eventPath;
-    const stems = new Set([eventNotePath(event, sourceName, settings), ...current ? [current] : []]
+    const stems = new Set([eventNotePath(event, this.sourceName(event), this.app, this.getSettings()), ...current ? [current] : []]
       .map(path => pathKey(path).replace(/\.md$/, '').replace(/ \(\d+\)$/, '')));
     const linkedDaily = new Set(Object.values(this.store.state.noteLinks).map(link => pathKey(link.dailyPath)));
     const candidates = (await this.store.io.listMarkdown()).filter(path => {
@@ -797,6 +866,8 @@ export class EventNoteService {
           const link = state.noteLinks[note.id];
           link.eventPath = file.path;
           link.pendingRename = { oldPath, newPath: file.path };
+          // Any rename, ours or the user's, settles where the note lives.
+          delete link.moveTo;
           state.pathTypes[pathKey(file.path)] = { type: 'event', ownerId: note.id };
           delete state.pathTypes[pathKey(oldPath)];
         });
