@@ -25,6 +25,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   sidebarCollapsed: false,
   mainCollapsed: false,
   workdaysOnly: false,
+  monthsOnStartup: true,
 };
 
 type RecordLike = Record<string, unknown>;
@@ -45,6 +46,7 @@ export function normalizePluginSettings(raw: unknown, fallback: PluginSettings =
     // Both panels hidden would leave an empty view, so the main calendar wins.
     mainCollapsed: mainCollapsed && !sidebarCollapsed,
     workdaysOnly: typeof input.workdaysOnly === 'boolean' ? input.workdaysOnly : fallback.workdaysOnly,
+    monthsOnStartup: typeof input.monthsOnStartup === 'boolean' ? input.monthsOnStartup : fallback.monthsOnStartup,
     eventPropertiesDefault: isEventPropertiesDefault(input.eventPropertiesDefault)
       ? input.eventPropertiesDefault : fallback.eventPropertiesDefault,
     eventClickAction: isEventClickAction(input.eventClickAction) ? input.eventClickAction : fallback.eventClickAction,

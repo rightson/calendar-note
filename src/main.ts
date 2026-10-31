@@ -1,7 +1,7 @@
 import { Modal, Notice, Plugin, TFile, requestUrl } from 'obsidian';
 import { CalendarNoteView, CALENDAR_VIEW_TYPE } from './calendar-view';
 import { MonthsView, MONTHS_VIEW_TYPE } from './months-view';
-import { calendarOpenModeForClick, openCalendarLeaf, type CalendarOpenMode } from './calendar-open';
+import { calendarOpenModeForClick, ensureSidebarView, leafBelowFileExplorer, openCalendarLeaf, type CalendarOpenMode } from './calendar-open';
 import { EventPropertiesController } from './event-properties';
 import { ChangeHistoryModal } from './modals';
 import { EventNoteProblemsModal } from './problems-modal';
@@ -67,6 +67,7 @@ export default class CalendarNotePlugin extends Plugin {
     this.addCommand({ id: 'open-calendar', name: 'Open calendar in new tab', callback: () => void this.openCalendar('tab') });
     this.addCommand({ id: 'open-calendar-right', name: 'Open calendar in right split', callback: () => void this.openCalendar('right-split') });
     this.addCommand({ id: 'open-months', name: 'Open month calendar in sidebar', callback: () => void this.openMonths() });
+    this.addCommand({ id: 'open-months-below-explorer', name: 'Move month calendar below the file explorer', callback: () => void this.openMonths('below-explorer') });
     this.addCommand({ id: 'new-event', name: 'New event', callback: () => void this.openCalendar().then(view => view.newEvent()) });
     this.addCommand({ id: 'remove-duplicate-event-title', name: 'Remove duplicate Event Note title', checkCallback: checking => {
       const file = this.app.workspace.getActiveFile();
@@ -115,6 +116,7 @@ export default class CalendarNotePlugin extends Plugin {
       this.ready = true;
       void this.runAction(async () => { await this.notes.finalizePendingRenames(); }).then(() => this.rescan());
       this.subscriptions.start();
+      if (this.store.state.settings.monthsOnStartup) void ensureSidebarView(this.app.workspace, MONTHS_VIEW_TYPE);
       if (this.range) void this.refresh(false);
       if (this.store.recoveryConflict) this.showRecovery();
     });
@@ -162,13 +164,19 @@ export default class CalendarNotePlugin extends Plugin {
     return leaf.view as CalendarNoteView;
   }
 
-  /** Reveal the month calendar, adding it to the right sidebar the first time. */
-  async openMonths(): Promise<void> {
-    const existing = this.app.workspace.getLeavesOfType(MONTHS_VIEW_TYPE)[0];
-    const leaf = existing ?? this.app.workspace.getRightLeaf(false);
+  /**
+   * Reveal the month calendar where it is, adding it to the right sidebar the
+   * first time; 'below-explorer' moves it under the file explorer instead.
+   */
+  async openMonths(place: 'sidebar' | 'below-explorer' = 'sidebar'): Promise<void> {
+    const workspace = this.app.workspace;
+    const existing = workspace.getLeavesOfType(MONTHS_VIEW_TYPE);
+    if (place === 'below-explorer') existing.forEach(leaf => leaf.detach());
+    const reuse = place === 'sidebar' ? existing[0] : undefined;
+    const leaf = reuse ?? (place === 'below-explorer' ? leafBelowFileExplorer(workspace) : workspace.getRightLeaf(false));
     if (!leaf) return;
-    if (!existing) await leaf.setViewState({ type: MONTHS_VIEW_TYPE, active: true });
-    await this.app.workspace.revealLeaf(leaf);
+    if (!reuse) await leaf.setViewState({ type: MONTHS_VIEW_TYPE, active: true });
+    await workspace.revealLeaf(leaf);
   }
 
   async onVisibleRange(range: CalendarRange): Promise<void> {

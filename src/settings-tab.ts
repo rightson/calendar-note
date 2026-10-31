@@ -83,6 +83,13 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
     this.dropdown(root, 'Clicking an event', 'eventClickAction', [
       ['dialog', 'Show event details'], ['split', 'Open Event Note beside the calendar'], ['tab', 'Open Event Note in a new tab'],
     ], 'The event details dialog can still open the Event Note either way.');
+    new Setting(root).setName('Month calendar').setHeading();
+    new Setting(root).setName('Add to the right sidebar at startup')
+      .setDesc('Only when the month calendar is not already open. Drag its tab to move it; it stays where you put it.')
+      .addToggle(toggle => toggle.setValue(settings.monthsOnStartup).onChange(value => void this.save(next => { next.monthsOnStartup = value; })));
+    new Setting(root).setName('Place below the file explorer')
+      .setDesc('Moves the month calendar to the left sidebar, under the file explorer.')
+      .addButton(button => button.setButtonText('Move').onClick(() => void this.plugin.openMonths('below-explorer')));
     new Setting(root).setName('Subscriptions').setHeading();
     this.number(root, 'Refresh interval (minutes)', 'syncIntervalMinutes');
     for (const source of settings.sources) this.sourceSetting(root, source);

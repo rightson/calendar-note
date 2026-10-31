@@ -25,3 +25,10 @@ test('enabled note providers override fallbacks without changing their blank roo
   assert.deepEqual(resolveDailySettings(app, DEFAULT_SETTINGS), { folder: '', format: 'YYYY/MM/DD', template: 'Templates/Day', provider: 'daily-notes' });
   assert.deepEqual(resolveWeeklySettings(app, DEFAULT_SETTINGS), { folder: '', format: 'GGGG-[W]WW', template: '', provider: 'periodic-notes' });
 });
+
+test('the month calendar joins the right sidebar at startup unless turned off', async () => {
+  const { normalizePluginSettings } = await import('../src/settings');
+  assert.equal(normalizePluginSettings({}).monthsOnStartup, true);
+  assert.equal(normalizePluginSettings({ monthsOnStartup: false }).monthsOnStartup, false);
+  assert.equal(normalizePluginSettings({ monthsOnStartup: 'no' }).monthsOnStartup, true);
+});

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Workspace, WorkspaceLeaf } from 'obsidian';
-import { calendarOpenModeForClick, noteSplitLeaf, oppositeTabLeaf, openCalendarLeaf, sideTabLeaf } from '../src/calendar-open';
+import { calendarOpenModeForClick, ensureSidebarView, FILE_EXPLORER_VIEW_TYPE, leafBelowFileExplorer, noteSplitLeaf, oppositeTabLeaf, openCalendarLeaf, sideTabLeaf } from '../src/calendar-open';
 
 const viewType = 'calendar-note-view';
 
@@ -205,4 +205,44 @@ test('from a right sidebar, Left opens in the main area and Right splits the sid
   assert.equal((sideTabLeaf(workspace, calendar, 'left') as unknown as Item).parent, main);
   sideTabLeaf(workspace, calendar, 'right');
   assert.deepEqual(splits, [{ from: calendar, direction: 'vertical' }]);
+});
+
+test('the month calendar goes below the file explorer in the left sidebar', () => {
+  const leftSplit = {}; const rightSplit = {};
+  const calls: unknown[][] = [];
+  const explorer = { getRoot: () => leftSplit };
+  const below = { name: 'below' };
+  const workspace = {
+    leftSplit, rightSplit,
+    getLeavesOfType: (type: string) => type === FILE_EXPLORER_VIEW_TYPE ? [explorer] : [],
+    createLeafBySplit: (...args: unknown[]) => { calls.push(args); return below; },
+    getLeftLeaf: () => { throw new Error('should split the explorer'); },
+  } as unknown as Workspace;
+  assert.equal(leafBelowFileExplorer(workspace), below as unknown as WorkspaceLeaf);
+  assert.deepEqual(calls, [[explorer, 'horizontal']]);
+});
+
+test('without a file explorer in the left sidebar the month calendar takes a new left group', () => {
+  const leftSplit = {}; const fallback = { name: 'left' };
+  const splits: boolean[] = [];
+  const workspace = {
+    leftSplit,
+    getLeavesOfType: () => [{ getRoot: () => ({}) }],
+    createLeafBySplit: () => { throw new Error('the explorer is not in the left sidebar'); },
+    getLeftLeaf: (split: boolean) => { splits.push(split); return fallback; },
+  } as unknown as Workspace;
+  assert.equal(leafBelowFileExplorer(workspace), fallback as unknown as WorkspaceLeaf);
+  assert.deepEqual(splits, [true]);
+});
+
+test('startup adds the month calendar to the right sidebar only when it is not open anywhere', async () => {
+  const states: unknown[] = [];
+  const right = { setViewState: async (state: unknown) => { states.push(state); } };
+  let open: unknown[] = [];
+  const workspace = { getLeavesOfType: () => open, getRightLeaf: () => right } as unknown as Workspace;
+  assert.equal(await ensureSidebarView(workspace, 'months'), right as unknown as WorkspaceLeaf);
+  assert.deepEqual(states, [{ type: 'months', active: false }]);
+  open = [{}];
+  assert.equal(await ensureSidebarView(workspace, 'months'), undefined);
+  assert.equal(states.length, 1);
 });
