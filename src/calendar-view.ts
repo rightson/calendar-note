@@ -7,7 +7,7 @@ import multiMonthPlugin from '@fullcalendar/multimonth';
 import interactionPlugin, { type DateClickArg, type EventResizeDoneArg } from '@fullcalendar/interaction';
 import momentTimezonePlugin from '@fullcalendar/moment-timezone';
 import moment from 'moment-timezone';
-import { dateAt, weekInfo } from './date';
+import { dateAt, firstWeekday, weekInfo } from './date';
 import { resolveWeekRules } from './settings';
 import type { CalendarEvent, Interval, PluginSettings } from './types';
 import type CalendarNotePlugin from './main';
@@ -290,10 +290,7 @@ export class CalendarNoteView extends ItemView {
     this.renderMini();
   }
   private firstDay(): number {
-    const rules = resolveWeekRules(this.app, this.settings);
-    if (rules.weekMode === 'iso') return 1;
-    const names = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-    return rules.weekStart === 'locale' ? dateAt(new Date(), this.settings.timeZone).locale(rules.locale).localeData().firstDayOfWeek() : names.indexOf(rules.weekStart);
+    return firstWeekday(resolveWeekRules(this.app, this.settings), this.settings.timeZone);
   }
   private applySidebarLayout(requested = this.pendingSidebarWidth ?? this.settings.sidebarWidth): void {
     if (!this.shellEl || !this.sidebarEl || !this.separatorEl) return;

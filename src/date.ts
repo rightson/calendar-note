@@ -43,3 +43,11 @@ export function weekInfo(value: string | Date, rules: WeekRules, zone: string): 
 export function formatAt(value: string | Date, format: string, rules: WeekRules, zone: string): string {
   return scopedWeekDate(value, rules, zone).date.format(format);
 }
+
+const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+/** The first column of a week row, 0 for Sunday through 6 for Saturday. */
+export function firstWeekday(rules: WeekRules, zone: string, now: Date = new Date()): number {
+  if (rules.weekMode === 'iso') return 1;
+  return rules.weekStart === 'locale' ? dateAt(now, zone).locale(rules.locale).localeData().firstDayOfWeek() : WEEKDAYS.indexOf(rules.weekStart);
+}
