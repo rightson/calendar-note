@@ -6,6 +6,7 @@ import { isEventClickAction, isEventPropertiesDefault, isMainDateClickAction, is
 import { dailyNotePath, eventNotePath, weeklyNotePath, folderPath } from './paths';
 import { patchSubscription, subscriptionStatus } from './subscription-settings';
 import { PROBLEM_LABELS, PROBLEM_ORDER } from './note-problems';
+import { holidayOptions, isCalendarKind, isHolidayShade } from './holidays';
 
 const sample = { id: 'local|sample', sourceId: 'local', uid: 'sample', title: 'Sample event', start: '2026-10-23T09:00:00+08:00', end: '2026-10-23T10:00:00+08:00', allDay: false };
 type TextSettingKey = 'eventPattern' | 'dailyFolder' | 'dailyFormat' | 'dailyTemplate'
@@ -35,6 +36,8 @@ export function validatePluginSettings(app: App, settings: PluginSettings): { ev
     try { parsed = new URL(source.url.trim()); } catch { throw new Error('Enter a valid HTTPS or webcal subscription URL.'); }
     if (!['https:', 'webcal:'].includes(parsed.protocol)) throw new Error('Use an HTTPS or webcal subscription URL.');
     if (seen.has(source.id)) throw new Error('Duplicate subscription identity.');
+    if (source.kind !== undefined && !isCalendarKind(source.kind)) throw new Error('Choose a valid calendar type.');
+    if (source.holidayShade !== undefined && !isHolidayShade(source.holidayShade)) throw new Error('Choose a valid holiday background.');
     seen.add(source.id);
   }
   return { event, daily, weekly };
@@ -232,6 +235,7 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
       input.inputEl.addEventListener('blur', () => update({ url: input.getValue().trim() }));
     });
     new Setting(section).setName('Color').addColorPicker(picker => picker.setValue(source.color).onChange(value => update({ color: value })));
+    this.holidaySettings(section, source, update);
     new Setting(section).setName('Enabled').addToggle(toggle => {
       enabledToggle = toggle;
       toggle.setValue(source.enabled).onChange(value => {
@@ -242,5 +246,37 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
       void this.save(next => { next.sources = next.sources.filter(item => item.id !== source.id); }, true);
     }));
     this.statusElements.set(source.id, section.createEl('p', { cls: 'setting-item-description' }));
+  }
+  /** Holiday options appear only for holiday calendars, and the color only for a custom background. */
+  private holidaySettings(section: HTMLElement, source: CalendarSource, update: (patch: Partial<CalendarSource>) => void): void {
+    const initial = holidayOptions(source);
+    let kind = initial.kind;
+    let shade = initial.shade;
+    const holidayOnly: HTMLElement[] = [];
+    let colorSetting: Setting | undefined;
+    const sync = () => {
+      for (const element of holidayOnly) element.toggle(kind === 'holidays');
+      colorSetting?.settingEl.toggle(kind === 'holidays' && shade === 'custom');
+    };
+    new Setting(section).setName('Calendar type')
+      .setDesc('A holiday calendar marks the days its events cover, in the main calendar and the mini calendar.')
+      .addDropdown(select => select.addOption('events', 'Events').addOption('holidays', 'Holidays').setValue(kind).onChange(value => {
+        if (!isCalendarKind(value)) return;
+        kind = value; sync(); update({ kind: value });
+      }));
+    const shadeSetting = new Setting(section).setName('Holiday background')
+      .setDesc('Background for holiday dates. Gray follows the theme.')
+      .addDropdown(select => select.addOption('gray', 'Gray').addOption('custom', 'Custom color').addOption('none', 'None').setValue(shade).onChange(value => {
+        if (!isHolidayShade(value)) return;
+        shade = value; sync(); update({ holidayShade: value });
+      }));
+    holidayOnly.push(shadeSetting.settingEl);
+    colorSetting = new Setting(section).setName('Holiday background color')
+      .addColorPicker(picker => picker.setValue(initial.color).onChange(value => update({ holidayColor: value })));
+    const showSetting = new Setting(section).setName('Show holiday names')
+      .setDesc('Show the holidays as events. When off, holiday dates keep their background and the mini calendar names them on hover.')
+      .addToggle(toggle => toggle.setValue(initial.showEvents).onChange(value => update({ showHolidayEvents: value })));
+    holidayOnly.push(showSetting.settingEl);
+    sync();
   }
 }

@@ -31,6 +31,15 @@ Settings → **Clicking** chooses what a left-click does in each calendar:
 
 Subscriptions are optional. Add an HTTPS or `webcal://` feed in settings to display read-only calendar events. Local events work without a subscription. Imported calendar data is cached for use in the calendar, and event changes can be reviewed in History. Removing the plugin or a feed does not delete Vault notes.
 
+### Holiday calendars
+
+Set a subscription's **Calendar type** to **Holidays** (for example a public-holiday feed such as Google's Taiwan holidays) to mark the days its events cover, not just list them. Each holiday calendar has its own options:
+
+- **Holiday background:** **Gray** (the default, following the light or dark theme), **Custom color** (pick it under **Holiday background color**), or **None**. The background fills the whole day in Week, Day, and Custom days views (both the all-day row and the time grid) and the day cell in Month and Year views. The sidebar mini calendar marks the same dates; hover a date to see the holiday's name.
+- **Show holiday names:** turn off to hide the holiday events themselves while keeping their dates shaded. Hidden holidays also leave List view and the right-click **Edit** menu.
+
+When several holiday calendars share a date, the first one in settings sets its background. The mini calendar marks holidays from every month already loaded for that calendar, so months you have never viewed may appear unmarked until you visit them. Subscriptions without a type stay ordinary event calendars.
+
 ### Where Event Notes go
 
 The **Event Note pattern** setting decides where new Event Notes are created. It accepts Moment date tokens and `{title}`, `{calendar}`, and `{uid}`; the default is `[Calendar Notes]/{title}`.

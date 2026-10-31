@@ -150,3 +150,9 @@
 .cn-problem-note .cn-validation { margin: 0; font-size: var(--font-ui-small); }
 @media (max-width: 850px) { .cn-content { padding: 12px; } .cn-toolbar { align-items: flex-start; } }
 @media (max-width: 550px) { .cn-controls, .cn-navigation { width: 100%; } .cn-controls > * { flex: 1; } .cn-calendar .fc-toolbar-title { font-size: 1rem; } }
+
+/* Holiday calendars: date backgrounds in the main and mini calendars. */
+.calendar-note-view .fc .cn-holiday-background { opacity: .35; }
+.cn-mini button.is-holiday:not(.is-selected) { background: color-mix(in srgb, var(--cn-holiday-color, transparent) 35%, transparent); }
+.cn-mini button.is-holiday:not(.is-selected):hover, .cn-mini button.is-holiday:not(.is-selected):focus-visible { background: color-mix(in srgb, var(--cn-holiday-color, transparent) 55%, transparent); }
+.cn-mini button.is-holiday-unshaded { text-decoration: underline dotted; text-underline-offset: 3px; }

@@ -14,12 +14,24 @@ export interface CalendarEvent {
   description?: string;
 }
 
+/** A holiday calendar marks the days its events cover instead of only listing them. */
+export type CalendarKind = 'events' | 'holidays';
+/** How a holiday calendar colors the days it covers. */
+export type HolidayShade = 'gray' | 'custom' | 'none';
+
 export interface CalendarSource {
   id: string;
   name: string;
   url: string;
   color: string;
   enabled: boolean;
+  /** Older saved subscriptions have no kind and stay ordinary event calendars. */
+  kind?: CalendarKind;
+  holidayShade?: HolidayShade;
+  /** Day background when `holidayShade` is `custom`. */
+  holidayColor?: string;
+  /** Whether the holiday events themselves appear; their days stay shaded either way. */
+  showHolidayEvents?: boolean;
 }
 
 export interface Interval {
