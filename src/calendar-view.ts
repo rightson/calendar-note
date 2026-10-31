@@ -11,10 +11,9 @@ import { dateAt, weekInfo } from './date';
 import { resolveWeekRules } from './settings';
 import type { CalendarEvent, Interval, PluginSettings } from './types';
 import type CalendarNotePlugin from './main';
-import { EventModal, LinkNoteModal, NoteChoiceModal } from './modals';
+import { EventActions } from './event-actions';
 import { miniMonthColumns, visibleMonthCount } from './calendar-layout';
 import { editMenuTitle, eventsAt, type PointerSpan } from './calendar-menu';
-import { noteSplitLeaf, oppositeTabLeaf, sideTabLeaf } from './calendar-open';
 import { sidebarWidthForContainer, resizeSidebarWithKeyboard, togglePanel, type CalendarPanel } from './sidebar-layout';
 import { subscriptionFailureMessage } from './subscription-settings';
 
@@ -35,7 +34,6 @@ export class CalendarNoteView extends ItemView {
   private sidebarRestore?: HTMLButtonElement;
   private mainRestore?: HTMLButtonElement;
   private mainCollapse?: HTMLButtonElement;
-  private noteLeaf?: WorkspaceLeaf;
   private workdaysToggle?: HTMLButtonElement;
   private shellResizeObserver?: ResizeObserver;
   private stopSidebarDrag?: () => void;
@@ -57,7 +55,12 @@ export class CalendarNoteView extends ItemView {
   private pendingSidebarWidth?: number;
   private viewType = 'timeGridWeek';
 
-  constructor(leaf: WorkspaceLeaf, public readonly plugin: CalendarNotePlugin) { super(leaf); }
+  private readonly actions: EventActions;
+
+  constructor(leaf: WorkspaceLeaf, public readonly plugin: CalendarNotePlugin) {
+    super(leaf);
+    this.actions = new EventActions(plugin, () => this.leaf);
+  }
   getViewType(): string { return CALENDAR_VIEW_TYPE; }
   getDisplayText(): string { return 'Calendar Note'; }
   getIcon(): string { return 'calendar-days'; }
@@ -202,7 +205,7 @@ export class CalendarNoteView extends ItemView {
         }
         this.renderListDates(info.view.type, info.start, info.end);
         this.installDateButtons();
-        void this.plugin.onVisibleRange({ start: info.start.toISOString(), end: info.end.toISOString() });
+        void this.plugin.onVisibleRange({ start: info.start.toISOString(), end: info.end.toISOString() }, this);
       },
       dateClick: arg => this.handleDateClick(arg),
       dayHeaderContent: arg => {
@@ -231,7 +234,7 @@ export class CalendarNoteView extends ItemView {
         details.textContent = '⋯';
         details.type = 'button';
         details.setAttribute('aria-label', `Details and edit: ${event.title}`);
-        details.addEventListener('click', e => { e.stopPropagation(); this.showEventDetails(event); });
+        details.addEventListener('click', e => { e.stopPropagation(); this.actions.showDetails(event); });
         arg.el.appendChild(details);
         arg.el.addEventListener('contextmenu', e => {
           e.preventDefault(); e.stopPropagation(); this.showSlotMenu(e, event);
@@ -278,6 +281,7 @@ export class CalendarNoteView extends ItemView {
     if (this.miniResizeFrame) cancelAnimationFrame(this.miniResizeFrame);
     if (this.layoutResizeFrame) cancelAnimationFrame(this.layoutResizeFrame);
     this.calendar?.destroy(); this.calendar = undefined;
+    this.plugin.releaseVisibleRange(this);
   }
   get settings(): PluginSettings { return this.plugin.store.state.settings; }
   private today(): string { return dateAt(new Date(), this.settings.timeZone).format('YYYY-MM-DD'); }
@@ -383,11 +387,8 @@ export class CalendarNoteView extends ItemView {
   private get miniOnly(): boolean { return this.settings.mainCollapsed && !this.settings.sidebarCollapsed; }
   /** With only the mini calendar showing, notes open in one reused leaf beside it instead of a new tab. */
   private noteTarget(): () => WorkspaceLeaf {
-    return this.miniOnly ? this.besideTarget : this.tabTarget;
+    return this.miniOnly ? this.actions.besideTarget : this.actions.tabTarget;
   }
-  /** New tabs go on the far side of the calendar when a pane is there, so the calendar stays in view. */
-  private readonly tabTarget = (): WorkspaceLeaf => oppositeTabLeaf(this.app.workspace, this.leaf) ?? this.app.workspace.getLeaf('tab');
-  private readonly besideTarget = (): WorkspaceLeaf => (this.noteLeaf = noteSplitLeaf(this.app.workspace, this.leaf, this.noteLeaf));
   private async openWeek(day: string): Promise<void> { await this.plugin.runAction(() => this.plugin.notes.openWeekly(day, this.noteTarget())); }
   private async openDay(day: string): Promise<void> { this.selectedDay = day; this.renderMini(); await this.plugin.runAction(() => this.plugin.notes.openDaily(day, this.noteTarget())); }
   private renderMini(): void {
@@ -548,28 +549,7 @@ export class CalendarNoteView extends ItemView {
     arg.jsEvent.preventDefault();
     if (Date.now() - this.lastDragAt < 600) return;
     const event = this.plugin.eventById(arg.event.id);
-    if (!event) return;
-    switch (this.settings.eventClickAction) {
-      case 'split': this.openEventNote(event, this.besideTarget); break;
-      case 'tab': this.openEventNote(event, this.tabTarget); break;
-      default: this.showEventDetails(event);
-    }
-  }
-  private openEventNote(event: CalendarEvent, target: () => WorkspaceLeaf): void {
-    void this.plugin.runAction(() => this.plugin.notes.openEvent(event, paths => new NoteChoiceModal(this.app, paths).choose(), target));
-  }
-  private showEventDetails(event: CalendarEvent): void {
-    new EventModal(this.app, this.settings, async value => {
-      if (value.title !== event.title) { new Notice('Edit the Event Note title in Obsidian.'); return; }
-      await this.plugin.reschedule(event, value.interval);
-    }, event, undefined, {
-      path: this.plugin.store.state.noteLinks[event.id]?.eventPath,
-      change: () => void this.changeEventNote(event),
-      calendar: this.settings.sources.find(source => source.id === event.sourceId)?.name,
-      candidates: () => this.plugin.notes.noteCandidates(event),
-      bind: path => this.plugin.linkEventNote(event, path, paths => new NoteChoiceModal(this.app, paths).choose(), false),
-      open: place => this.openEventNote(event, place === 'tab' ? this.tabTarget : () => sideTabLeaf(this.app.workspace, this.leaf, place)),
-    }).open();
+    if (event) this.actions.click(event);
   }
   /** Right-click: add an event here, or edit any event shown under the pointer. */
   private showSlotMenu(e: MouseEvent, clicked?: CalendarEvent): void {
@@ -579,14 +559,9 @@ export class CalendarNoteView extends ItemView {
     const events = eventsAt(this.plugin.events, span, this.settings.timeZone, clicked);
     if (events.length) menu.addSeparator();
     for (const event of events) {
-      menu.addItem(item => item.setTitle(editMenuTitle(event, this.settings.timeZone)).setIcon('pencil').onClick(() => this.showEventDetails(event)));
+      menu.addItem(item => item.setTitle(editMenuTitle(event, this.settings.timeZone)).setIcon('pencil').onClick(() => this.actions.showDetails(event)));
     }
     menu.showAtMouseEvent(e);
-  }
-  private async changeEventNote(event: CalendarEvent): Promise<void> {
-    const current = this.plugin.store.state.noteLinks[event.id]?.eventPath;
-    const path = await new LinkNoteModal(this.app, current).choose();
-    if (path) await this.plugin.linkEventNote(event, path, paths => new NoteChoiceModal(this.app, paths).choose());
   }
   private async handleMove(arg: EventDropArg | EventResizeDoneArg): Promise<void> {
     this.lastDragAt = Date.now();
@@ -627,6 +602,6 @@ export class CalendarNoteView extends ItemView {
     const day = this.selectedDay ?? this.today();
     const start = initial?.start ?? moment.tz(`${day}T09:00:00`, 'YYYY-MM-DDTHH:mm:ss', true, this.settings.timeZone).toISOString();
     const interval = initial ?? { start, end: dateAt(start, this.settings.timeZone).add(this.settings.defaultDurationMinutes, 'minutes').toISOString() };
-    new EventModal(this.app, this.settings, async value => { await this.plugin.createLocal(value.title, value.interval); }, undefined, interval).open();
+    this.actions.newEvent(interval);
   }
 }
