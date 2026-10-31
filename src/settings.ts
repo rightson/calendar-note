@@ -5,6 +5,7 @@ import { normalizeSidebarWidth, SIDEBAR_DEFAULT_WIDTH } from './sidebar-layout';
 export const DEFAULT_SETTINGS: PluginSettings = {
   sources: [],
   eventPattern: '[Calendar Notes]/{title}',
+  moveEventNotes: true,
   eventPropertiesDefault: 'collapsed',
   eventClickAction: 'dialog',
   miniDateClickAction: 'navigate',
@@ -47,6 +48,7 @@ export function normalizePluginSettings(raw: unknown, fallback: PluginSettings =
     // Both panels hidden would leave an empty view, so the main calendar wins.
     mainCollapsed: mainCollapsed && !sidebarCollapsed,
     workdaysOnly: typeof input.workdaysOnly === 'boolean' ? input.workdaysOnly : fallback.workdaysOnly,
+    moveEventNotes: typeof input.moveEventNotes === 'boolean' ? input.moveEventNotes : fallback.moveEventNotes,
     eventPropertiesDefault: isEventPropertiesDefault(input.eventPropertiesDefault)
       ? input.eventPropertiesDefault : fallback.eventPropertiesDefault,
     eventClickAction: isEventClickAction(input.eventClickAction) ? input.eventClickAction : fallback.eventClickAction,

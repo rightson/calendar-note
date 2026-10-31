@@ -22,7 +22,7 @@ export function validatePluginSettings(app: App, settings: PluginSettings): { ev
   if (!isMiniDateClickAction(settings.miniDateClickAction)) throw new Error('Choose a valid mini calendar click action.');
   if (!isMainDateClickAction(settings.mainDateClickAction)) throw new Error('Choose a valid main calendar click action.');
   folderPath(settings.dailyFolder); folderPath(settings.weeklyFolder);
-  const event = eventNotePath(sample, 'Local', settings);
+  const event = eventNotePath(sample, 'Local', app, settings);
   const daily = dailyNotePath('2026-10-23', app, settings);
   const weekly = weeklyNotePath('2026-10-23', app, settings);
   const normalized = [event, daily, weekly].map(path => path.normalize('NFC').toLocaleLowerCase('en-US'));
@@ -54,8 +54,9 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
     const settings = this.plugin.store.state.settings;
     root.createEl('p', { text: 'Local events work without a calendar subscription.' });
     new Setting(root).setName('Note paths').setHeading();
-    this.text(root, 'Event Note pattern', 'Moment date tokens, {title}, {calendar}, and {uid}.', 'eventPattern');
-    this.sample(root, current => eventNotePath(sample, 'Local', current));
+    this.text(root, 'Event Note pattern', 'Moment date tokens, {title}, {calendar}, and {uid}. Start with {daily}/ to use the folder of the event’s Daily Note, such as {daily}/{title}.', 'eventPattern');
+    this.sample(root, current => eventNotePath(sample, 'Local', this.app, current));
+    this.toggle(root, 'Move Event Notes when dates change', 'When an event moves to another date, move its Event Note to the folder the pattern gives for that date, such as the new Daily Note’s folder with {daily}. Notes you moved yourself stay put.', 'moveEventNotes');
     this.dropdown(root, 'Event Note Properties', 'eventPropertiesDefault', [
       ['obsidian', 'Follow Obsidian'], ['collapsed', 'Collapsed'], ['expanded', 'Expanded'],
     ], 'Initial Properties state when an Event Note opens. You can toggle it in the note.');
@@ -172,6 +173,13 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
         void this.save(next => { (next as unknown as Record<string, unknown>)[key] = value; });
       });
       input.inputEl.addEventListener('keydown', e => { if (e.key === 'Enter') input.inputEl.blur(); });
+    });
+  }
+  private toggle(root: HTMLElement, name: string, description: string, key: 'moveEventNotes'): void {
+    new Setting(root).setName(name).setDesc(description).addToggle(toggle => {
+      toggle.setValue(this.plugin.store.state.settings[key]).onChange(value => {
+        void this.save(next => { next[key] = value; });
+      });
     });
   }
   private number(root: HTMLElement, name: string, key: 'defaultDurationMinutes' | 'syncIntervalMinutes' | 'customDays'): void {
