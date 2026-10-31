@@ -18,6 +18,15 @@ npm run package
 
 `npm run build` writes the plugin bundle to the repository root as `main.js`. `npm run package` rebuilds it and creates `dist/calendar-note.zip`, containing the `calendar-note/` directory with `main.js`, `manifest.json`, `styles.css`, `LICENSE`, and generated `THIRD_PARTY_LICENSES.txt`.
 
+For day-to-day development, `npm run dev` rebuilds into a Vault on every save:
+
+```sh
+npm run dev -- /absolute/path/to/Vault
+# or: export CALENDAR_NOTE_VAULT=/absolute/path/to/Vault; npm run dev
+```
+
+It writes `main.js` (with an inline source map) to `<Vault>/.obsidian/plugins/calendar-note/` each time a source file changes, copies `manifest.json` and `styles.css` when they change, and leaves the last good `main.js` in place when a build fails. The path must be absolute (a leading `~` is expanded) and contain a `.obsidian` folder; unlike the test installer, any Vault is accepted, so prefer a test Vault for unreleased code. It also adds an empty `.hotreload` file to the plugin folder: with the [Hot Reload](https://github.com/pjeby/hot-reload) community plugin installed, Obsidian reloads Calendar-Note after each build; without it, turn the plugin off and on in **Settings → Community plugins**. Plugin data (`data.json`) is never touched. Stop it with Ctrl+C.
+
 For a dedicated test Vault, build first and use an explicit absolute path:
 
 ```sh
