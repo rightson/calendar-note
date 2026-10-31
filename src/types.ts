@@ -44,6 +44,8 @@ export interface WeekRules {
 export interface PluginSettings extends WeekRules {
   sources: CalendarSource[];
   eventPattern: string;
+  /** Move an Event Note to its pattern path when the event's date changes. */
+  moveEventNotes: boolean;
   eventPropertiesDefault: EventPropertiesDefault;
   eventClickAction: EventClickAction;
   dailyFolder: string;

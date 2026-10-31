@@ -31,6 +31,8 @@ To keep Event Notes beside their Daily Notes, start the pattern with `{daily}`. 
 
 When an event moves to another date, its Event Note moves with it to the folder the pattern gives for the new date. This applies whether you drag the event, edit it in the calendar, change `start` in the note, or a subscription changes it. Obsidian updates links to the note as for any rename (when **Automatically update internal links** is on), and the Daily Note entry moves to the new Daily Note. A note you renamed keeps its name; if the target name is taken, a number is added, as in `Standup (2).md`. Notes you moved out of the pattern's folder yourself, or chose with **Change…**, stay where they are. A pattern without date folders, such as the default, never moves notes. Changing the pattern or Daily Notes settings affects new notes only.
 
+To keep Event Notes where they were created, turn off **Move Event Notes when dates change** in settings (it is on by default). The Daily Note entry still moves to the new date and links to the note where it is. Turning the setting off also cancels any move that has not happened yet.
+
 ## Privacy and compatibility
 
 No account or telemetry is required. Calendar-Note makes read-only HTTPS requests only to fetch calendar feeds whose URLs you configure. Feed URLs, raw ICS responses, settings, history, link tracking, and recovery data are stored in Obsidian's private plugin data; Event, Daily, and Weekly Notes are written to your Vault. The plugin does not access files outside the Vault and its plugin data folder.

@@ -575,6 +575,7 @@ export class EventNoteService {
    */
   private plannedMove(event: CalendarEvent, notePath: string, previous: NoteLink | undefined,
     parsed: ReturnType<typeof parseEventNote>): string | undefined {
+    if (!this.getSettings().moveEventNotes) return undefined;
     // A newly created or newly chosen note stays where it is.
     if (!previous || previous.pendingRename || pathKey(previous.eventPath) !== pathKey(notePath)) return undefined;
     const placedAt = previous.placedAt ?? (parsed ? { start: parsed.start, allDay: parsed.allDay } : undefined);
@@ -607,7 +608,8 @@ export class EventNoteService {
         let holds = false;
         try { holds = content !== null && parseEventNote(content, from)?.id === id; }
         catch { /* an invalid note is reported by the scan */ }
-        if (file && holds) {
+        // Turning the setting off cancels moves not carried out yet.
+        if (file && holds && this.getSettings().moveEventNotes) {
           const destination = await this.freeEventPath(target, id);
           await this.ensureFolder(destination);
           await this.app.fileManager.renameFile(file, destination);

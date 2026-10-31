@@ -584,6 +584,25 @@ test('a failed move leaves the Event Note and its link in place and is not retri
   assert.ok(io.files.has(from));
 });
 
+test('with moving turned off, Event Notes stay and moves not carried out yet are cancelled', async () => {
+  const { io, service, store } = followingDaily();
+  const kept = await service.createLocal({ title: 'Kept', ...at('2026-10-22') });
+  const pending = await service.createLocal({ title: 'Pending', ...at('2026-10-22') });
+  await service.reschedule(pending, at('2026-11-02'));
+  assert.equal(store.state.noteLinks[pending.id].moveTo, 'Daily Notes/2026/11/Pending.md');
+  store.state.settings.moveEventNotes = false;
+  await service.reschedule(kept, at('2026-11-02'));
+  assert.equal(store.state.noteLinks[kept.id].moveTo, undefined);
+  assert.deepEqual(await service.settleMoves(), []);
+  assert.equal(store.state.noteLinks[pending.id].moveTo, undefined);
+  for (const [event, path] of [[kept, 'Daily Notes/2026/10/Kept.md'], [pending, 'Daily Notes/2026/10/Pending.md']] as const) {
+    assert.equal(store.state.noteLinks[event.id].eventPath, path);
+    assert.ok(io.files.has(path));
+  }
+  // The Daily entry still moves to the new date and links the note where it is.
+  assert.match(io.files.get('Daily Notes/2026/11/2026-11-02.md')!, /\[\[Daily Notes\/2026\/10\/Kept\|Kept\]\]/);
+});
+
 test('patterns without date folders never move Event Notes', async () => {
   const { service, store } = setup();
   const event = await service.createLocal({ title: 'Fixed', ...at('2026-10-22') });
