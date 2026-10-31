@@ -52,7 +52,7 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
     const settings = this.plugin.store.state.settings;
     root.createEl('p', { text: 'Local events work without a calendar subscription.' });
     new Setting(root).setName('Note paths').setHeading();
-    this.text(root, 'Event Note pattern', 'Moment date tokens, {title}, {calendar}, and {uid}. Start with {daily}/ to use the folder of the event’s Daily Note, such as {daily}/{title}.', 'eventPattern');
+    this.text(root, 'Event Note pattern', 'Moment date tokens, {title}, {calendar}, and {uid}. Start with {daily}/ to use the folder of the event’s Daily Note, such as {daily}/{title}. Notes move with their event when its date changes.', 'eventPattern');
     this.sample(root, current => eventNotePath(sample, 'Local', this.app, current));
     this.dropdown(root, 'Event Note Properties', 'eventPropertiesDefault', [
       ['obsidian', 'Follow Obsidian'], ['collapsed', 'Collapsed'], ['expanded', 'Expanded'],

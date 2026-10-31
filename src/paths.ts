@@ -2,6 +2,7 @@ import type { App } from 'obsidian';
 import type { CalendarEvent, PluginSettings, WeekRules } from './types';
 import { eventCalendarDate, formatAt, weekInfo } from './date';
 import { resolveDailySettings, resolveWeeklySettings, resolveWeekRules } from './settings';
+import { pathKey } from './state';
 
 const reserved = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i;
 // eslint-disable-next-line no-control-regex -- Control characters cannot appear in Vault note names.
@@ -115,6 +116,28 @@ export function eventNotePath(event: CalendarEvent, sourceName: string, app: App
     { locale: settings.locale, weekMode: settings.weekMode, weekStart: settings.weekStart },
     settings.timeZone, { title: event.title, calendar: sourceName, uid: event.uid });
   return folder ? `${folder}/${path}` : path;
+}
+
+const folderOf = (path: string): string => path.slice(0, Math.max(path.lastIndexOf('/'), 0));
+const nameOf = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
+/** A note name without the ` (2)` suffix that keeps it apart from a namesake. */
+const stemOf = (path: string): string => pathKey(nameOf(path)).replace(/\.md$/, '').replace(/ \(\d+\)$/, '');
+
+/**
+ * Where an Event Note the pattern placed for `before` belongs once its event
+ * becomes `after`, or undefined when `current` is not in the pattern's folder
+ * for `before`, as after the user moved the note or linked another one. A note
+ * still carrying the pattern's name takes the new name too; a renamed note
+ * keeps its own name and only changes folder.
+ */
+export function followPatternPath(current: string, before: CalendarEvent, after: CalendarEvent,
+  sourceName: string, app: App, settings: PluginSettings): string | undefined {
+  const was = eventNotePath(before, sourceName, app, settings);
+  if (pathKey(folderOf(current)) !== pathKey(folderOf(was))) return undefined;
+  const next = eventNotePath(after, sourceName, app, settings);
+  const name = stemOf(current) === stemOf(was) ? nameOf(next) : nameOf(current);
+  const folder = folderOf(next);
+  return folder ? `${folder}/${name}` : name;
 }
 
 export function dailyNotePath(date: string | Date, app: App, settings: PluginSettings): string {

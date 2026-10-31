@@ -12,9 +12,24 @@ Calendar-Note requires **Obsidian 1.14.5 or later** and supports desktop Obsidia
 
 ## Use
 
-Open the calendar from the ribbon icon or the command palette. Create a local event from **New event** or an empty calendar slot. The event is saved as a Markdown Event Note and linked under `## Events` in the Daily Note for its start date. To keep Event Notes beside their Daily Notes, start the **Event Note pattern** setting with `{daily}`, as in `{daily}/{title}`: `{daily}` becomes the folder of that day's Daily Note. Click a date to open its Daily Note; the sidebar's week number opens that Weekly Note. Right-click the calendar to open a menu: **New event** creates one at that time, and an **Edit** entry appears for each event at that time (or on that day in Month view), so overlapping events can each be reached. To use a different note for an event, open its details from that menu or from **⋯** and choose **Change…** beside Event Note: pick any Markdown note or type a new path. The previous Event Note stays in the Vault as an ordinary note with its text intact. If Event Notes conflict or cannot be read (for example, a duplicated note with the same `event_id`), run **Review Event Note problems** or click the toolbar's problem button: each problem lists the notes side by side, highlights what differs, recommends which to keep, and fixes it in place.
+Open the calendar from the ribbon icon or the command palette. Create a local event from **New event** or an empty calendar slot. The event is saved as a Markdown Event Note and linked under `## Events` in the Daily Note for its start date. Click a date to open its Daily Note; the sidebar's week number opens that Weekly Note. Right-click the calendar to open a menu: **New event** creates one at that time, and an **Edit** entry appears for each event at that time (or on that day in Month view), so overlapping events can each be reached. To use a different note for an event, open its details from that menu or from **⋯** and choose **Change…** beside Event Note: pick any Markdown note or type a new path. The previous Event Note stays in the Vault as an ordinary note with its text intact. If Event Notes conflict or cannot be read (for example, a duplicated note with the same `event_id`), run **Review Event Note problems** or click the toolbar's problem button: each problem lists the notes side by side, highlights what differs, recommends which to keep, and fixes it in place.
 
 Subscriptions are optional. Add an HTTPS or `webcal://` feed in settings to display read-only calendar events. Local events work without a subscription. Imported calendar data is cached for use in the calendar, and event changes can be reviewed in History. Removing the plugin or a feed does not delete Vault notes.
+
+### Where Event Notes go
+
+The **Event Note pattern** setting decides where new Event Notes are created. It accepts Moment date tokens and `{title}`, `{calendar}`, and `{uid}`; the default is `[Calendar Notes]/{title}`.
+
+To keep Event Notes beside their Daily Notes, start the pattern with `{daily}`. It stands for the folder of the event's Daily Note. For example, with Daily Notes in `Journal` using the format `YYYY/MM/YYYY-MM-DD`:
+
+| Pattern | Event on 2026-10-23 |
+|---|---|
+| `{daily}/{title}` | `Journal/2026/10/<title>.md` |
+| `{daily}/[Events]/{title}` | `Journal/2026/10/Events/<title>.md` |
+
+`{daily}` must be the first part of the pattern and be followed by `/`.
+
+When an event moves to another date, its Event Note moves with it to the folder the pattern gives for the new date. This applies whether you drag the event, edit it in the calendar, change `start` in the note, or a subscription changes it. Obsidian updates links to the note as for any rename (when **Automatically update internal links** is on), and the Daily Note entry moves to the new Daily Note. A note you renamed keeps its name; if the target name is taken, a number is added, as in `Standup (2).md`. Notes you moved out of the pattern's folder yourself, or chose with **Change…**, stay where they are. A pattern without date folders, such as the default, never moves notes. Changing the pattern or Daily Notes settings affects new notes only.
 
 ## Privacy and compatibility
 

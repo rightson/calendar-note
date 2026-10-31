@@ -43,15 +43,30 @@ function setup(io = new FakeVault()) {
   const opened: string[] = [];
   const trashed: string[] = [];
   const revealed: unknown[] = [];
+  let service: EventNoteService;
   const app = {
-    vault: { getAbstractFileByPath: (path: string) => io.files.has(path) ? { path, extension: 'md' } : null },
+    vault: {
+      getAbstractFileByPath: (path: string) => io.files.has(path) ? { path, extension: 'md' } : null,
+      createFolder: async () => undefined,
+    },
     workspace: {
       getLeaf: () => ({ openFile: async (file: { path: string }) => { opened.push(file.path); } }),
       revealLeaf: async (leaf: unknown) => { revealed.push(leaf); },
     },
-    fileManager: { trashFile: async (file: { path: string }) => { trashed.push(file.path); io.files.delete(file.path); } },
+    fileManager: {
+      trashFile: async (file: { path: string }) => { trashed.push(file.path); io.files.delete(file.path); },
+      // As in the plugin: the Vault rename event, then the completed link update.
+      renameFile: async (file: { path: string }, newPath: string) => {
+        if (io.files.has(newPath)) throw new Error('Destination file already exists!');
+        io.files.set(newPath, io.files.get(file.path)!);
+        io.files.delete(file.path);
+        await service.handleRename({ path: newPath, extension: 'md' } as never, file.path);
+        await service.finalizePendingRenames(newPath);
+      },
+    },
   } as unknown as App;
-  return { io, store, service: new EventNoteService(app, store), opened, trashed, revealed };
+  service = new EventNoteService(app, store);
+  return { io, store, service, opened, trashed, revealed };
 }
 
 const start = '2026-10-22T10:00:00+08:00';
@@ -472,6 +487,109 @@ test('pending rename survives restart and settles without changing unrelated Dai
   assert.match(io.files.get(old.dailyPath)!, /Personal journal/);
   assert.match(io.files.get(old.dailyPath)!, /\[\[Calendar Notes\/Restart moved/);
   assert.equal(restarted.store.state.noteLinks[event.id].pendingRename, undefined);
+});
+
+function followingDaily() {
+  const context = setup();
+  Object.assign(context.store.state.settings, { dailyFolder: 'Daily Notes', dailyFormat: 'YYYY/MM/YYYY-MM-DD', eventPattern: '{daily}/{title}' });
+  return context;
+}
+const at = (day: string) => ({ start: `${day}T10:00:00+08:00`, end: `${day}T11:00:00+08:00` });
+
+test('a date change moves an Event Note to the folder of its new Daily Note', async () => {
+  const { io, service, store } = followingDaily();
+  const event = await service.createLocal({ title: 'Standup', ...at('2026-10-22') });
+  assert.equal(store.state.noteLinks[event.id].eventPath, 'Daily Notes/2026/10/Standup.md');
+  const moved = await service.reschedule(event, at('2026-11-02'));
+  // The move waits for the commit, so Obsidian can update links to the note.
+  assert.equal(store.state.noteLinks[event.id].moveTo, 'Daily Notes/2026/11/Standup.md');
+  assert.deepEqual(await service.settleMoves(), []);
+  const link = store.state.noteLinks[event.id];
+  assert.equal(link.eventPath, 'Daily Notes/2026/11/Standup.md');
+  assert.equal(link.moveTo, undefined);
+  assert.equal(link.pendingRename, undefined);
+  assert.equal(io.files.has('Daily Notes/2026/10/Standup.md'), false);
+  assert.equal(parseEventNote(io.files.get(link.eventPath)!, link.eventPath)!.start, moved.start);
+  assert.match(io.files.get('Daily Notes/2026/11/2026-11-02.md')!, /\[\[Daily Notes\/2026\/11\/Standup\|Standup\]\]/);
+  assert.doesNotMatch(io.files.get('Daily Notes/2026/10/2026-10-22.md')!, /Standup/);
+  // Another day in the same folder needs no move.
+  await service.reschedule(moved, at('2026-11-03'));
+  assert.equal(store.state.noteLinks[event.id].moveTo, undefined);
+});
+
+test('a renamed Event Note keeps its name when its date moves it; one moved elsewhere stays', async () => {
+  const { io, service, store } = followingDaily();
+  const renamed = await service.createLocal({ title: 'Renamed', ...at('2026-10-22') });
+  const stays = await service.createLocal({ title: 'Stays', ...at('2026-10-22') });
+  const rename = async (event: CalendarEvent, path: string) => {
+    const from = store.state.noteLinks[event.id].eventPath;
+    io.files.set(path, io.files.get(from)!);
+    io.files.delete(from);
+    await service.handleRename({ path, extension: 'md' } as never, from);
+    await service.finalizePendingRenames(path);
+  };
+  await rename(renamed, 'Daily Notes/2026/10/Team sync.md');
+  await rename(stays, 'Projects/Stays.md');
+  await service.reschedule(renamed, at('2026-12-01'));
+  await service.reschedule(stays, at('2026-12-01'));
+  assert.equal(store.state.noteLinks[stays.id].moveTo, undefined);
+  await service.settleMoves();
+  assert.equal(store.state.noteLinks[renamed.id].eventPath, 'Daily Notes/2026/12/Team sync.md');
+  assert.equal(store.state.noteLinks[stays.id].eventPath, 'Projects/Stays.md');
+  assert.ok(io.files.has('Projects/Stays.md'));
+});
+
+test('a moved Event Note takes a free name, follows date tokens in its name, and old links fall back to the note', async () => {
+  const { io, service, store } = followingDaily();
+  const event = await service.createLocal({ title: 'Review', ...at('2026-10-22') });
+  io.files.set('Daily Notes/2026/11/Review.md', 'Someone else\'s note\n');
+  // Links saved before placements were recorded read the note's own time.
+  delete store.state.noteLinks[event.id].placedAt;
+  await service.reschedule(event, at('2026-11-05'));
+  await service.settleMoves();
+  assert.equal(store.state.noteLinks[event.id].eventPath, 'Daily Notes/2026/11/Review (2).md');
+  assert.equal(io.files.get('Daily Notes/2026/11/Review.md'), 'Someone else\'s note\n');
+
+  store.state.settings.eventPattern = '{daily}/MM-DD {title}';
+  const dated = await service.createLocal({ title: 'Dated', ...at('2026-10-22') });
+  assert.equal(store.state.noteLinks[dated.id].eventPath, 'Daily Notes/2026/10/10-22 Dated.md');
+  await service.reschedule(dated, at('2026-11-05'));
+  await service.settleMoves();
+  assert.equal(store.state.noteLinks[dated.id].eventPath, 'Daily Notes/2026/11/11-05 Dated.md');
+});
+
+test('editing an Event Note start in its frontmatter moves the note too', async () => {
+  const { io, service, store } = followingDaily();
+  const event = await service.createLocal({ title: 'Edited', ...at('2026-10-22') });
+  const path = store.state.noteLinks[event.id].eventPath;
+  io.files.set(path, writeEventFrontmatter(io.files.get(path)!, { ...event, ...at('2026-11-09') }));
+  await service.scanEvents();
+  assert.equal(store.state.noteLinks[event.id].moveTo, 'Daily Notes/2026/11/Edited.md');
+  await service.settleMoves();
+  assert.equal(store.state.noteLinks[event.id].eventPath, 'Daily Notes/2026/11/Edited.md');
+  assert.match(io.files.get('Daily Notes/2026/11/2026-11-09.md')!, /\[\[Daily Notes\/2026\/11\/Edited\|Edited\]\]/);
+});
+
+test('a failed move leaves the Event Note and its link in place and is not retried', async () => {
+  const { io, service, store } = followingDaily();
+  const event = await service.createLocal({ title: 'Stuck', ...at('2026-10-22') });
+  await service.reschedule(event, at('2026-11-02'));
+  const from = store.state.noteLinks[event.id].eventPath;
+  (service as unknown as { app: App }).app.fileManager.renameFile = async () => { throw new Error('locked'); };
+  const failures = await service.settleMoves();
+  assert.equal(failures.length, 1);
+  assert.match(failures[0], /Could not move Daily Notes\/2026\/10\/Stuck\.md to Daily Notes\/2026\/11\/Stuck\.md: locked/);
+  assert.equal(store.state.noteLinks[event.id].eventPath, from);
+  assert.equal(store.state.noteLinks[event.id].moveTo, undefined);
+  assert.ok(io.files.has(from));
+});
+
+test('patterns without date folders never move Event Notes', async () => {
+  const { service, store } = setup();
+  const event = await service.createLocal({ title: 'Fixed', ...at('2026-10-22') });
+  await service.reschedule(event, at('2026-12-24'));
+  assert.equal(store.state.noteLinks[event.id].moveTo, undefined);
+  assert.equal(store.state.noteLinks[event.id].eventPath, 'Calendar Notes/Fixed.md');
 });
 
 test('direct Event Note frontmatter edit reindexes and moves its managed bullet', async () => {
