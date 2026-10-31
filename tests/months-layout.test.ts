@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { firstWeekday } from '../src/date';
-import { eventCountsByDay, monthSpanLabel, monthsThatFit } from '../src/months-layout';
+import { chooseMonthDensity, eventCountsByDay, monthSpanLabel, monthsThatFit } from '../src/months-layout';
 import type { CalendarEvent } from '../src/types';
 
 test('the month calendar adds following months while whole cards fit its height', () => {
@@ -46,4 +46,24 @@ test('week rows start on the configured weekday', () => {
   assert.equal(firstWeekday({ locale: 'en', weekMode: 'iso', weekStart: 'sunday' }, 'UTC'), 1);
   assert.equal(firstWeekday({ locale: 'en', weekMode: 'calendar', weekStart: 'saturday' }, 'UTC'), 6);
   assert.equal(firstWeekday({ locale: 'en-gb', weekMode: 'calendar', weekStart: 'locale' }, 'UTC'), 1);
+});
+
+test('cards shrink only until three months fit', () => {
+  const cards = [{ height: 240, gap: 14 }, { height: 175, gap: 10 }, { height: 140, gap: 6 }];
+  // Tall enough: the roomy size already shows three or more.
+  assert.deepEqual(chooseMonthDensity(1300, cards), { index: 0, count: 5 });
+  assert.deepEqual(chooseMonthDensity(760, cards), { index: 0, count: 3 });
+  // Half a sidebar: shrink to the first size that reaches three.
+  assert.deepEqual(chooseMonthDensity(560, cards), { index: 1, count: 3 });
+  assert.deepEqual(chooseMonthDensity(440, cards), { index: 2, count: 3 });
+  // Too short for three: the most months, with the roomiest size on a tie.
+  assert.deepEqual(chooseMonthDensity(300, cards), { index: 2, count: 2 });
+  assert.deepEqual(chooseMonthDensity(200, cards), { index: 1, count: 1 });
+  // Not even one whole card fits: the tightest hides the least.
+  assert.deepEqual(chooseMonthDensity(100, cards), { index: 2, count: 1 });
+});
+
+test('columns count toward the three-month target', () => {
+  const cards = [{ height: 240, gap: 14 }, { height: 140, gap: 6 }];
+  assert.deepEqual(chooseMonthDensity(500, cards, 2), { index: 0, count: 4 });
 });

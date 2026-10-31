@@ -52,3 +52,34 @@ export function eventCountsByDay(events: CalendarEvent[], zone: string, from: st
   }
   return counts;
 }
+
+/** Card sizes from roomiest to tightest; each has its own row gap. */
+export const MONTH_DENSITIES = [
+  { name: 'regular', gap: 14 },
+  { name: 'compact', gap: 10 },
+  { name: 'tight', gap: 6 },
+] as const;
+export type MonthDensity = typeof MONTH_DENSITIES[number]['name'];
+/** Shrinking stops once this many months fit. */
+export const MONTHS_TARGET = 3;
+
+/**
+ * The roomiest card size that shows `target` months. When none does, the size
+ * that shows the most whole months, preferring the roomier one on a tie, so
+ * cards only shrink when that adds a month. When not even one card fits whole,
+ * the tightest size, which hides the least.
+ */
+export function chooseMonthDensity(
+  availableHeight: number, cards: { height: number; gap: number }[], columns = 1, target = MONTHS_TARGET,
+): { index: number; count: number } {
+  let best = { index: 0, count: 0 };
+  for (const [index, card] of cards.entries()) {
+    if (best.count >= target) break;
+    const fits = Number.isFinite(availableHeight) && card.height > 0 && card.height <= availableHeight;
+    const count = fits ? monthsThatFit(availableHeight, card.height, card.gap, columns) : 0;
+    if (count > best.count) best = { index, count };
+  }
+  if (best.count) return best;
+  const tightest = Math.max(0, cards.length - 1);
+  return { index: tightest, count: monthsThatFit(availableHeight, cards[tightest]?.height ?? 0, cards[tightest]?.gap ?? 0, columns) };
+}

@@ -4,12 +4,11 @@ import { dateAt, firstWeekday, weekInfo } from './date';
 import { resolveWeekRules } from './settings';
 import { dailyNotePath } from './paths';
 import { miniMonthColumns } from './calendar-layout';
-import { eventCountsByDay, monthSpanLabel, monthsThatFit } from './months-layout';
+import { chooseMonthDensity, eventCountsByDay, MONTH_DENSITIES, monthSpanLabel, type MonthDensity } from './months-layout';
 import type { PluginSettings, WeekRules } from './types';
 import type CalendarNotePlugin from './main';
 
 export const MONTHS_VIEW_TYPE = 'calendar-note-months';
-const MONTH_GAP = 14;
 const MAX_DOTS = 3;
 
 /**
@@ -91,17 +90,28 @@ export class MonthsView extends ItemView {
     const rules = resolveWeekRules(this.app, this.settings);
     const columns = miniMonthColumns(container.clientWidth);
     container.style.setProperty('--cn-months-columns', String(columns));
-    container.style.setProperty('--cn-months-gap', `${MONTH_GAP}px`);
     const first = dateAt(this.firstMonth, zone).locale('en');
-    // Measure one real card, then add the following months while whole cards fit.
     const span = { from: first.clone().subtract(7, 'days').format('YYYY-MM-DD'), to: first.clone().add(25, 'months').format('YYYY-MM-DD') };
     const context = this.renderContext(rules, span);
+    // Measure one real card at each size, keep the roomiest that shows enough
+    // months, then add the following months while whole cards fit.
+    const cards = MONTH_DENSITIES.map(density => {
+      this.setDensity(container, density.name, density.gap);
+      container.empty();
+      return { height: this.renderMonth(container, first, context).getBoundingClientRect().height, gap: density.gap };
+    });
+    const { index, count } = chooseMonthDensity(container.clientHeight, cards, columns);
+    const density = MONTH_DENSITIES[index]!;
+    this.setDensity(container, density.name, density.gap);
     container.empty();
-    const probe = this.renderMonth(container, first, context);
-    const count = monthsThatFit(container.clientHeight, probe.getBoundingClientRect().height, MONTH_GAP, columns);
-    for (let month = 1; month < count; month++) this.renderMonth(container, first.clone().add(month, 'months'), context);
+    for (let month = 0; month < count; month++) this.renderMonth(container, first.clone().add(month, 'months'), context);
     this.titleEl?.setText(monthSpanLabel(this.firstMonth, count, zone));
     if (this.titleEl) this.titleEl.title = count === 1 ? 'Showing one month' : `Showing ${count} months`;
+  }
+
+  private setDensity(container: HTMLElement, name: MonthDensity, gap: number): void {
+    for (const density of MONTH_DENSITIES) container.toggleClass(`is-${density.name}`, density.name === name);
+    container.style.setProperty('--cn-months-gap', `${gap}px`);
   }
 
   private renderContext(rules: WeekRules, span: { from: string; to: string }) {
