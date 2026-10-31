@@ -14,6 +14,7 @@ import type CalendarNotePlugin from './main';
 import { EventModal, LinkNoteModal, NoteChoiceModal } from './modals';
 import { miniMonthColumns, visibleMonthCount } from './calendar-layout';
 import { editMenuTitle, eventsAt, type PointerSpan } from './calendar-menu';
+import { mainDateClick, miniDateClick, type NotePlacement } from './calendar-click';
 import { noteSplitLeaf, oppositeTabLeaf, sideTabLeaf } from './calendar-open';
 import { sidebarWidthForContainer, resizeSidebarWithKeyboard, togglePanel, type CalendarPanel } from './sidebar-layout';
 import { subscriptionFailureMessage } from './subscription-settings';
@@ -308,9 +309,10 @@ export class CalendarNoteView extends ItemView {
     this.shellEl.toggleClass('is-main-collapsed', mainCollapsed);
     this.shellEl.toggleClass('is-sidebar-overlay', overlay);
     this.sidebarEl.style.width = mainCollapsed ? '' : `${overlay ? Math.min(260, Math.max(0, this.shellEl.clientWidth - 16)) : width}px`;
-    if (this.miniNavTitle) this.miniNavTitle.title = mainCollapsed
-      ? 'Dates open Daily Notes and week numbers open Weekly Notes beside the calendar.'
-      : 'Dates navigate the calendar. Week numbers open Weekly Notes.';
+    const placement = miniDateClick(this.settings.miniDateClickAction, mainCollapsed);
+    const dates = placement === 'split' ? 'Dates open Daily Notes beside the calendar.'
+      : placement === 'tab' ? 'Dates open Daily Notes in a new tab.' : 'Dates navigate the calendar.';
+    if (this.miniNavTitle) this.miniNavTitle.title = `${dates} Week numbers open Weekly Notes${mainCollapsed ? ' beside the calendar' : ''}.`;
     this.separatorEl.setAttribute('aria-valuenow', String(width || requested));
     this.updateDisplayControls();
     if (this.layoutResizeFrame) cancelAnimationFrame(this.layoutResizeFrame);
@@ -392,7 +394,13 @@ export class CalendarNoteView extends ItemView {
   private readonly tabTarget = (): WorkspaceLeaf => oppositeTabLeaf(this.app.workspace, this.leaf) ?? this.app.workspace.getLeaf('tab');
   private readonly besideTarget = (): WorkspaceLeaf => (this.noteLeaf = noteSplitLeaf(this.app.workspace, this.leaf, this.noteLeaf));
   private async openWeek(day: string): Promise<void> { await this.plugin.runAction(() => this.plugin.notes.openWeekly(day, this.noteTarget())); }
-  private async openDay(day: string): Promise<void> { this.selectedDay = day; this.renderMini(); await this.plugin.runAction(() => this.plugin.notes.openDaily(day, this.noteTarget())); }
+  private placementTarget(placement?: NotePlacement): () => WorkspaceLeaf {
+    return placement === 'split' ? this.besideTarget : placement === 'tab' ? this.tabTarget : this.noteTarget();
+  }
+  private async openDay(day: string, placement?: NotePlacement): Promise<void> {
+    this.selectedDay = day; this.renderMini();
+    await this.plugin.runAction(() => this.plugin.notes.openDaily(day, this.placementTarget(placement)));
+  }
   private renderMini(): void {
     if (!this.miniEl || !this.miniMonth) return;
     const first = dateAt(this.miniMonth, this.settings.timeZone).locale('en');
@@ -430,11 +438,11 @@ export class CalendarNoteView extends ItemView {
         const day = start.clone().add(row * 7 + col, 'days').format('YYYY-MM-DD');
         const td = tr.createEl('td');
         if (day.slice(0, 7) !== monthDate.format('YYYY-MM')) td.addClass('is-outside');
-        const miniOnly = this.miniOnly;
+        const placement = miniDateClick(this.settings.miniDateClickAction, this.miniOnly);
         const button = this.button(td, String(Number(day.slice(-2))), () => {
           this.selectedDay = day; this.calendar?.gotoDate(day); this.renderMini();
-          if (miniOnly) void this.openDay(day);
-        }, miniOnly ? `Open Daily Note for ${day}` : `Navigate to ${day}`);
+          if (placement) void this.openDay(day, placement);
+        }, placement ? `Open Daily Note for ${day}` : `Navigate to ${day}`);
         if (day === this.today()) button.addClass('is-today');
         if (day === this.selectedDay) button.addClass('is-selected');
         const holiday = this.holidays.get(day);
@@ -562,11 +570,12 @@ export class CalendarNoteView extends ItemView {
     this.refresh();
   }
   private handleDateClick(arg: DateClickArg): void {
-    const type = arg.view.type;
-    if (type === 'dayGridMonth' || type === 'multiMonthYear' || type === 'listWeek') {
-      void this.openDay(arg.dateStr.slice(0, 10)); return;
-    }
+    // Day numbers and week numbers sit inside date cells and handle their own clicks.
+    if ((arg.jsEvent.target as HTMLElement | null)?.closest('.cn-date-open, .fc-daygrid-day-number, .fc-daygrid-week-number')) return;
     const day = arg.dateStr.slice(0, 10);
+    const action = mainDateClick(this.settings.mainDateClickAction, arg.view.type);
+    if (action.kind === 'none') return;
+    if (action.kind === 'daily') { void this.openDay(day, action.placement); return; }
     this.newEvent({ start: arg.allDay ? day : arg.date.toISOString(),
       end: arg.allDay ? dateAt(day, this.settings.timeZone).add(1, 'day').format('YYYY-MM-DD')
         : dateAt(arg.date, this.settings.timeZone).add(this.settings.defaultDurationMinutes, 'minutes').toISOString(), allDay: arg.allDay });

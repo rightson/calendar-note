@@ -29,6 +29,8 @@ export default class CalendarNotePlugin extends Plugin {
   private scanTimer?: number;
   private scanning?: Promise<void>;
   private scanAgain = false;
+  private moving?: Promise<void>;
+  private moveAgain = false;
   private disposed = false;
   private ready = false;
   private lastDiagnostics = '';
@@ -59,7 +61,7 @@ export default class CalendarNotePlugin extends Plugin {
       const result = await requestUrl({ url, headers, method: 'GET', throw: false });
       return { status: result.status, text: result.text, headers: result.headers };
     });
-    this.store.onChange = () => { this.updateEventsFromCache(); this.refreshViews(); };
+    this.store.onChange = () => { this.updateEventsFromCache(); this.refreshViews(); this.scheduleMoves(); };
     this.registerView(CALENDAR_VIEW_TYPE, leaf => new CalendarNoteView(leaf, this));
     this.addRibbonIcon('calendar-days', 'Open Calendar Note', evt => void this.openCalendar(calendarOpenModeForClick(evt)));
     this.addCommand({ id: 'open-calendar', name: 'Open calendar in new tab', callback: () => void this.openCalendar('tab') });
@@ -111,6 +113,7 @@ export default class CalendarNotePlugin extends Plugin {
       if (this.disposed) return;
       this.ready = true;
       void this.runAction(async () => { await this.notes.finalizePendingRenames(); }).then(() => this.rescan());
+      this.scheduleMoves();
       this.subscriptions.start();
       if (this.range) void this.refresh(false);
       if (this.store.recoveryConflict) this.showRecovery();
@@ -171,6 +174,27 @@ export default class CalendarNotePlugin extends Plugin {
       if (this.range) await this.subscriptions.refresh(this.range, { force });
       this.updateEventsFromCache(); this.refreshViews();
     });
+  }
+
+  /**
+   * Move Event Notes whose date changed once the commit that recorded the move
+   * has returned; renameFile calls back into the note service's queue, so it
+   * cannot run inside that queue.
+   */
+  private scheduleMoves(): void {
+    if (!this.ready || this.disposed || this.store.recoveryConflict) return;
+    if (!Object.values(this.store.state.noteLinks).some(link => link.moveTo && !link.pendingRename)) return;
+    if (this.moving) { this.moveAgain = true; return; }
+    this.moving = (async () => {
+      await Promise.resolve();
+      do {
+        this.moveAgain = false;
+        try {
+          const failures = await this.notes.settleMoves();
+          for (const failure of failures) new Notice(failure);
+        } catch (error) { new Notice(error instanceof Error ? error.message : 'Could not move Event Notes.'); }
+      } while (this.moveAgain && !this.disposed);
+    })().finally(() => { this.moving = undefined; });
   }
 
   private scheduleScan(): void {
