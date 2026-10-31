@@ -60,7 +60,7 @@ export const MONTH_DENSITIES = [
   { name: 'tight', gap: 6 },
 ] as const;
 export type MonthDensity = typeof MONTH_DENSITIES[number]['name'];
-/** Shrinking stops once this many months fit. */
+/** Default for the "Show at least" setting: shrinking stops once this many months fit. */
 export const MONTHS_TARGET = 3;
 
 /**

@@ -67,3 +67,9 @@ test('columns count toward the three-month target', () => {
   const cards = [{ height: 240, gap: 14 }, { height: 140, gap: 6 }];
   assert.deepEqual(chooseMonthDensity(500, cards, 2), { index: 0, count: 4 });
 });
+
+test('a higher minimum keeps shrinking cards; a minimum of one never shrinks them when one fits', () => {
+  const cards = [{ height: 240, gap: 14 }, { height: 175, gap: 10 }, { height: 140, gap: 6 }];
+  assert.deepEqual(chooseMonthDensity(760, cards, 1, 5), { index: 2, count: 5 });
+  assert.deepEqual(chooseMonthDensity(300, cards, 1, 1), { index: 0, count: 1 });
+});

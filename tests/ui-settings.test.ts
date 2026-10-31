@@ -32,3 +32,11 @@ test('the month calendar joins the right sidebar at startup unless turned off', 
   assert.equal(normalizePluginSettings({ monthsOnStartup: false }).monthsOnStartup, false);
   assert.equal(normalizePluginSettings({ monthsOnStartup: 'no' }).monthsOnStartup, true);
 });
+
+test('the minimum month count is a whole number from 1 to 12, else 3', async () => {
+  const { normalizePluginSettings } = await import('../src/settings');
+  assert.equal(normalizePluginSettings({}).monthsMinimum, 3);
+  assert.equal(normalizePluginSettings({ monthsMinimum: 1 }).monthsMinimum, 1);
+  assert.equal(normalizePluginSettings({ monthsMinimum: 12 }).monthsMinimum, 12);
+  for (const bad of [0, 13, 2.5, '4', null]) assert.equal(normalizePluginSettings({ monthsMinimum: bad }).monthsMinimum, 3);
+});

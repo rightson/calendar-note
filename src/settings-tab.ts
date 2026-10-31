@@ -2,7 +2,7 @@ import { Notice, PluginSettingTab, Setting, type App, type ToggleComponent } fro
 import moment from 'moment-timezone';
 import type CalendarNotePlugin from './main';
 import type { CalendarSource, PluginSettings } from './types';
-import { isEventClickAction, isEventPropertiesDefault, resolveDailySettings, resolveWeeklySettings } from './settings';
+import { isEventClickAction, isEventPropertiesDefault, isMonthsMinimum, MONTHS_MINIMUM_MAX, resolveDailySettings, resolveWeeklySettings } from './settings';
 import { dailyNotePath, eventNotePath, weeklyNotePath, folderPath } from './paths';
 import { patchSubscription, subscriptionStatus } from './subscription-settings';
 import { PROBLEM_LABELS, PROBLEM_ORDER } from './note-problems';
@@ -19,6 +19,7 @@ export function validatePluginSettings(app: App, settings: PluginSettings): { ev
   if (!Number.isInteger(settings.customDays) || settings.customDays < 2 || settings.customDays > 14) throw new Error('Custom days must be 2–14.');
   if (!isEventPropertiesDefault(settings.eventPropertiesDefault)) throw new Error('Choose a valid Event Note Properties default.');
   if (!isEventClickAction(settings.eventClickAction)) throw new Error('Choose a valid event click action.');
+  if (!isMonthsMinimum(settings.monthsMinimum)) throw new Error(`Show at least 1–${MONTHS_MINIMUM_MAX} months.`);
   folderPath(settings.dailyFolder); folderPath(settings.weeklyFolder);
   const event = eventNotePath(sample, 'Local', settings);
   const daily = dailyNotePath('2026-10-23', app, settings);
@@ -87,6 +88,9 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
     new Setting(root).setName('Add to the right sidebar at startup')
       .setDesc('Only when the month calendar is not already open. Drag its tab to move it; it stays where you put it.')
       .addToggle(toggle => toggle.setValue(settings.monthsOnStartup).onChange(value => void this.save(next => { next.monthsOnStartup = value; })));
+    this.dropdown(root, 'Show at least', 'monthsMinimum',
+      Array.from({ length: MONTHS_MINIMUM_MAX }, (_, i) => [String(i + 1), i ? `${i + 1} months` : '1 month'] as [string, string]),
+      'In a short panel, month cards get smaller until this many months fit. A taller panel shows more at full size.');
     new Setting(root).setName('Place below the file explorer')
       .setDesc('Moves the month calendar to the left sidebar, under the file explorer.')
       .addButton(button => button.setButtonText('Move').onClick(() => void this.plugin.openMonths('below-explorer')));
@@ -178,14 +182,14 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
       input.inputEl.addEventListener('keydown', e => { if (e.key === 'Enter') input.inputEl.blur(); });
     });
   }
-  private dropdown(root: HTMLElement, name: string, key: 'weekMode' | 'weekStart' | 'snapMinutes' | 'eventPropertiesDefault' | 'eventClickAction', values: [string, string][], description?: string): void {
+  private dropdown(root: HTMLElement, name: string, key: 'weekMode' | 'weekStart' | 'snapMinutes' | 'eventPropertiesDefault' | 'eventClickAction' | 'monthsMinimum', values: [string, string][], description?: string): void {
     const setting = new Setting(root).setName(name);
     if (description) setting.setDesc(description);
     setting.addDropdown(select => {
       for (const [value, label] of values) select.addOption(value, label);
       select.setValue(String(this.plugin.store.state.settings[key]));
       select.onChange(value => {
-        void this.save(next => { (next as unknown as Record<string, unknown>)[key] = key === 'snapMinutes' ? Number(value) : value; });
+        void this.save(next => { (next as unknown as Record<string, unknown>)[key] = key === 'snapMinutes' || key === 'monthsMinimum' ? Number(value) : value; });
       });
     });
   }
