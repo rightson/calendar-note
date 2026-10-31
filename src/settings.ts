@@ -1,5 +1,5 @@
 import type { App } from 'obsidian';
-import type { EventClickAction, EventPropertiesDefault, PluginSettings, ResolvedNoteSettings, WeekRules, WeekStart } from './types';
+import type { EventClickAction, EventPropertiesDefault, MainDateClickAction, MiniDateClickAction, PluginSettings, ResolvedNoteSettings, WeekRules, WeekStart } from './types';
 import { normalizeSidebarWidth, SIDEBAR_DEFAULT_WIDTH } from './sidebar-layout';
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -7,6 +7,8 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   eventPattern: '[Calendar Notes]/{title}',
   eventPropertiesDefault: 'collapsed',
   eventClickAction: 'dialog',
+  miniDateClickAction: 'navigate',
+  mainDateClickAction: 'auto',
   dailyFolder: 'Daily Notes',
   dailyFormat: 'YYYY-MM-DD',
   dailyTemplate: '',
@@ -48,11 +50,21 @@ export function normalizePluginSettings(raw: unknown, fallback: PluginSettings =
     eventPropertiesDefault: isEventPropertiesDefault(input.eventPropertiesDefault)
       ? input.eventPropertiesDefault : fallback.eventPropertiesDefault,
     eventClickAction: isEventClickAction(input.eventClickAction) ? input.eventClickAction : fallback.eventClickAction,
+    miniDateClickAction: isMiniDateClickAction(input.miniDateClickAction) ? input.miniDateClickAction : fallback.miniDateClickAction,
+    mainDateClickAction: isMainDateClickAction(input.mainDateClickAction) ? input.mainDateClickAction : fallback.mainDateClickAction,
   };
 }
 
 export function isEventClickAction(value: unknown): value is EventClickAction {
   return value === 'dialog' || value === 'split' || value === 'tab';
+}
+
+export function isMiniDateClickAction(value: unknown): value is MiniDateClickAction {
+  return value === 'navigate' || value === 'split' || value === 'tab';
+}
+
+export function isMainDateClickAction(value: unknown): value is MainDateClickAction {
+  return value === 'auto' || value === 'event' || value === 'split' || value === 'tab' || value === 'none';
 }
 
 export function isEventPropertiesDefault(value: unknown): value is EventPropertiesDefault {
