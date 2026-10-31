@@ -28,6 +28,8 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   sidebarCollapsed: false,
   mainCollapsed: false,
   workdaysOnly: false,
+  monthsOnStartup: true,
+  monthsMinimum: 3,
 };
 
 type RecordLike = Record<string, unknown>;
@@ -49,12 +51,20 @@ export function normalizePluginSettings(raw: unknown, fallback: PluginSettings =
     mainCollapsed: mainCollapsed && !sidebarCollapsed,
     workdaysOnly: typeof input.workdaysOnly === 'boolean' ? input.workdaysOnly : fallback.workdaysOnly,
     moveEventNotes: typeof input.moveEventNotes === 'boolean' ? input.moveEventNotes : fallback.moveEventNotes,
+    monthsOnStartup: typeof input.monthsOnStartup === 'boolean' ? input.monthsOnStartup : fallback.monthsOnStartup,
+    monthsMinimum: isMonthsMinimum(input.monthsMinimum) ? input.monthsMinimum : fallback.monthsMinimum,
     eventPropertiesDefault: isEventPropertiesDefault(input.eventPropertiesDefault)
       ? input.eventPropertiesDefault : fallback.eventPropertiesDefault,
     eventClickAction: isEventClickAction(input.eventClickAction) ? input.eventClickAction : fallback.eventClickAction,
     miniDateClickAction: isMiniDateClickAction(input.miniDateClickAction) ? input.miniDateClickAction : fallback.miniDateClickAction,
     mainDateClickAction: isMainDateClickAction(input.mainDateClickAction) ? input.mainDateClickAction : fallback.mainDateClickAction,
   };
+}
+
+export const MONTHS_MINIMUM_MAX = 12;
+
+export function isMonthsMinimum(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= MONTHS_MINIMUM_MAX;
 }
 
 export function isEventClickAction(value: unknown): value is EventClickAction {

@@ -81,6 +81,10 @@ export interface PluginSettings extends WeekRules {
   sidebarCollapsed: boolean;
   mainCollapsed: boolean;
   workdaysOnly: boolean;
+  /** Add the month calendar to the right sidebar at startup when it is not open anywhere. */
+  monthsOnStartup: boolean;
+  /** Month cards shrink until at least this many months fit the panel. */
+  monthsMinimum: number;
 }
 
 export interface ResolvedNoteSettings {

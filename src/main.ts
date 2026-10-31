@@ -1,6 +1,7 @@
 import { Modal, Notice, Plugin, TFile, requestUrl } from 'obsidian';
 import { CalendarNoteView, CALENDAR_VIEW_TYPE } from './calendar-view';
-import { calendarOpenModeForClick, openCalendarLeaf, type CalendarOpenMode } from './calendar-open';
+import { MonthsView, MONTHS_VIEW_TYPE } from './months-view';
+import { calendarOpenModeForClick, ensureSidebarView, leafBelowFileExplorer, openCalendarLeaf, type CalendarOpenMode } from './calendar-open';
 import { EventPropertiesController } from './event-properties';
 import { ChangeHistoryModal } from './modals';
 import { EventNoteProblemsModal } from './problems-modal';
@@ -63,9 +64,12 @@ export default class CalendarNotePlugin extends Plugin {
     });
     this.store.onChange = () => { this.updateEventsFromCache(); this.refreshViews(); this.scheduleMoves(); };
     this.registerView(CALENDAR_VIEW_TYPE, leaf => new CalendarNoteView(leaf, this));
+    this.registerView(MONTHS_VIEW_TYPE, leaf => new MonthsView(leaf, this));
     this.addRibbonIcon('calendar-days', 'Open Calendar Note', evt => void this.openCalendar(calendarOpenModeForClick(evt)));
     this.addCommand({ id: 'open-calendar', name: 'Open calendar in new tab', callback: () => void this.openCalendar('tab') });
     this.addCommand({ id: 'open-calendar-right', name: 'Open calendar in right split', callback: () => void this.openCalendar('right-split') });
+    this.addCommand({ id: 'open-months', name: 'Open month calendar in sidebar', callback: () => void this.openMonths() });
+    this.addCommand({ id: 'open-months-below-explorer', name: 'Move month calendar below the file explorer', callback: () => void this.openMonths('below-explorer') });
     this.addCommand({ id: 'new-event', name: 'New event', callback: () => void this.openCalendar().then(view => view.newEvent()) });
     this.addCommand({ id: 'remove-duplicate-event-title', name: 'Remove duplicate Event Note title', checkCallback: checking => {
       const file = this.app.workspace.getActiveFile();
@@ -115,6 +119,7 @@ export default class CalendarNotePlugin extends Plugin {
       void this.runAction(async () => { await this.notes.finalizePendingRenames(); }).then(() => this.rescan());
       this.scheduleMoves();
       this.subscriptions.start();
+      if (this.store.state.settings.monthsOnStartup) void ensureSidebarView(this.app.workspace, MONTHS_VIEW_TYPE);
       if (this.range) void this.refresh(false);
       if (this.store.recoveryConflict) this.showRecovery();
     });
@@ -132,8 +137,13 @@ export default class CalendarNotePlugin extends Plugin {
     return this.app.workspace.getLeavesOfType(CALENDAR_VIEW_TYPE)
       .map(leaf => leaf.view).filter((view): view is CalendarNoteView => view instanceof CalendarNoteView);
   }
+  private getMonthsViews(): MonthsView[] {
+    return this.app.workspace.getLeavesOfType(MONTHS_VIEW_TYPE)
+      .map(leaf => leaf.view).filter((view): view is MonthsView => view instanceof MonthsView);
+  }
   private refreshViews(): void {
     for (const view of this.getViews()) view.refresh();
+    for (const view of this.getMonthsViews()) view.refresh();
     this.settingTab?.refreshSubscriptionStatus();
   }
   getVisibleRange(): CalendarRange | undefined { return this.range; }
@@ -155,6 +165,21 @@ export default class CalendarNotePlugin extends Plugin {
   async openCalendar(mode: CalendarOpenMode = 'tab'): Promise<CalendarNoteView> {
     const leaf = await openCalendarLeaf(this.app.workspace, CALENDAR_VIEW_TYPE, mode);
     return leaf.view as CalendarNoteView;
+  }
+
+  /**
+   * Reveal the month calendar where it is, adding it to the right sidebar the
+   * first time; 'below-explorer' moves it under the file explorer instead.
+   */
+  async openMonths(place: 'sidebar' | 'below-explorer' = 'sidebar'): Promise<void> {
+    const workspace = this.app.workspace;
+    const existing = workspace.getLeavesOfType(MONTHS_VIEW_TYPE);
+    if (place === 'below-explorer') existing.forEach(leaf => leaf.detach());
+    const reuse = place === 'sidebar' ? existing[0] : undefined;
+    const leaf = reuse ?? (place === 'below-explorer' ? leafBelowFileExplorer(workspace) : workspace.getRightLeaf(false));
+    if (!leaf) return;
+    if (!reuse) await leaf.setViewState({ type: MONTHS_VIEW_TYPE, active: true });
+    await workspace.revealLeaf(leaf);
   }
 
   async onVisibleRange(range: CalendarRange): Promise<void> {
@@ -322,6 +347,7 @@ export default class CalendarNotePlugin extends Plugin {
     await this.store.commit([], state => { state.settings = settings; });
     if (settings.eventPropertiesDefault !== previousPropertiesDefault) this.eventProperties?.settingsChanged();
     for (const view of this.getViews()) view.settingsChanged();
+    for (const view of this.getMonthsViews()) view.refresh();
     this.subscriptions.dispose();
     this.subscriptions = new SubscriptionService(this.store, this.sync, async (url, headers) => {
       const result = await requestUrl({ url, headers, method: 'GET', throw: false });

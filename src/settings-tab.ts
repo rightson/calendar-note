@@ -2,7 +2,7 @@ import { Notice, PluginSettingTab, Setting, type App, type ToggleComponent } fro
 import moment from 'moment-timezone';
 import type CalendarNotePlugin from './main';
 import type { CalendarSource, PluginSettings } from './types';
-import { isEventClickAction, isEventPropertiesDefault, isMainDateClickAction, isMiniDateClickAction, resolveDailySettings, resolveWeeklySettings } from './settings';
+import { isEventClickAction, isEventPropertiesDefault, isMainDateClickAction, isMiniDateClickAction, isMonthsMinimum, MONTHS_MINIMUM_MAX, resolveDailySettings, resolveWeeklySettings } from './settings';
 import { dailyNotePath, eventNotePath, weeklyNotePath, folderPath } from './paths';
 import { patchSubscription, subscriptionStatus } from './subscription-settings';
 import { PROBLEM_LABELS, PROBLEM_ORDER } from './note-problems';
@@ -22,6 +22,7 @@ export function validatePluginSettings(app: App, settings: PluginSettings): { ev
   if (!isEventClickAction(settings.eventClickAction)) throw new Error('Choose a valid event click action.');
   if (!isMiniDateClickAction(settings.miniDateClickAction)) throw new Error('Choose a valid mini calendar click action.');
   if (!isMainDateClickAction(settings.mainDateClickAction)) throw new Error('Choose a valid main calendar click action.');
+  if (!isMonthsMinimum(settings.monthsMinimum)) throw new Error(`Show at least 1–${MONTHS_MINIMUM_MAX} months.`);
   folderPath(settings.dailyFolder); folderPath(settings.weeklyFolder);
   const event = eventNotePath(sample, 'Local', app, settings);
   const daily = dailyNotePath('2026-10-23', app, settings);
@@ -102,6 +103,16 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
     this.dropdown(root, 'Clicking an event', 'eventClickAction', [
       ['dialog', 'Show event details'], ['split', 'Open Event Note beside the calendar'], ['tab', 'Open Event Note in a new tab'],
     ], 'In the main calendar. The event details dialog can still open the Event Note either way.');
+    new Setting(root).setName('Month calendar').setHeading();
+    new Setting(root).setName('Add to the right sidebar at startup')
+      .setDesc('Only when the month calendar is not already open. Drag its tab to move it; it stays where you put it.')
+      .addToggle(toggle => toggle.setValue(settings.monthsOnStartup).onChange(value => void this.save(next => { next.monthsOnStartup = value; })));
+    this.dropdown(root, 'Show at least', 'monthsMinimum',
+      Array.from({ length: MONTHS_MINIMUM_MAX }, (_, i) => [String(i + 1), i ? `${i + 1} months` : '1 month'] as [string, string]),
+      'In a short panel, month cards get smaller until this many months fit. A taller panel shows more at full size.');
+    new Setting(root).setName('Place below the file explorer')
+      .setDesc('Moves the month calendar to the left sidebar, under the file explorer.')
+      .addButton(button => button.setButtonText('Move').onClick(() => void this.plugin.openMonths('below-explorer')));
     new Setting(root).setName('Subscriptions').setHeading();
     this.number(root, 'Refresh interval (minutes)', 'syncIntervalMinutes');
     for (const source of settings.sources) this.sourceSetting(root, source);
@@ -197,14 +208,14 @@ export class CalendarNoteSettingTab extends PluginSettingTab {
       input.inputEl.addEventListener('keydown', e => { if (e.key === 'Enter') input.inputEl.blur(); });
     });
   }
-  private dropdown(root: HTMLElement, name: string, key: 'weekMode' | 'weekStart' | 'snapMinutes' | 'eventPropertiesDefault' | 'eventClickAction' | 'miniDateClickAction' | 'mainDateClickAction', values: [string, string][], description?: string): void {
+  private dropdown(root: HTMLElement, name: string, key: 'weekMode' | 'weekStart' | 'snapMinutes' | 'eventPropertiesDefault' | 'eventClickAction' | 'miniDateClickAction' | 'mainDateClickAction' | 'monthsMinimum', values: [string, string][], description?: string): void {
     const setting = new Setting(root).setName(name);
     if (description) setting.setDesc(description);
     setting.addDropdown(select => {
       for (const [value, label] of values) select.addOption(value, label);
       select.setValue(String(this.plugin.store.state.settings[key]));
       select.onChange(value => {
-        void this.save(next => { (next as unknown as Record<string, unknown>)[key] = key === 'snapMinutes' ? Number(value) : value; });
+        void this.save(next => { (next as unknown as Record<string, unknown>)[key] = key === 'snapMinutes' || key === 'monthsMinimum' ? Number(value) : value; });
       });
     });
   }
